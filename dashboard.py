@@ -315,7 +315,8 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
 
 # ── 圖表函式 ──────────────────────────────────────────────────────────────────
 
-_TW_BOUNDS = dict(west=117.5, east=124.0, south=20.5, north=26.8)
+# 寬鬆邊界：允許 zoom out 至可看到整個台灣（span ~13°），同時防止滑移至遠洋
+_TW_BOUNDS = dict(west=113.0, east=128.0, south=17.0, north=30.0)
 _LEGEND_STYLE = dict(
     font=dict(color="#222222", size=11),
     bgcolor="rgba(255,255,255,0.92)",
