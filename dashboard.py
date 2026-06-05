@@ -414,78 +414,93 @@ def make_hospital_map(df: pd.DataFrame, disease_filter: str = "全部",
     return fig
 
 
-def make_temporal_map(df: pd.DataFrame, disease_filter: str = "全部",
-                      height: int = 460) -> go.Figure:
-    """疾病時間擴散趨勢圖 — 病患居住地，依通報日期新舊著色（近期色深）"""
+def make_temporal_map(df: pd.DataFrame, height: int = 460) -> go.Figure:
+    """
+    疾病時間擴散地圖。
+    - 每種疾病獨立一條 trace，顏色在該疾病的時間範圍內正規化：
+      最舊案例 → 淺色透明，最新案例 → 深色不透明
+    - 點大小也隨時間變化（近期較大），不會因 zoom 消失
+    """
     if df.empty:
         return _empty_map(height)
-    plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
-    if plot_df.empty:
-        return _empty_map(height)
+    plot_df = df.copy()
+
+    # 座標：優先 home_lat/lon，退回縣市中心
+    has_home = ("home_lat" in plot_df.columns and "home_lon" in plot_df.columns)
+    if has_home:
+        lat_col = plot_df["home_lat"].where(
+            plot_df["home_lat"].notna() & (plot_df["home_lat"] != 0),
+            plot_df["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[0]),
+        ).astype(float)
+        lon_col = plot_df["home_lon"].where(
+            plot_df["home_lon"].notna() & (plot_df["home_lon"] != 0),
+            plot_df["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[1]),
+        ).astype(float)
+    else:
+        lat_col = plot_df["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[0])
+        lon_col = plot_df["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[1])
 
     today = datetime.now(TZ_TPE).date()
-    plot_df = plot_df.copy()
-
-    # 優先用 home_lat/lon，否則退回縣市中心
-    def _lat(row):
-        v = row.get("home_lat")
-        if v and pd.notna(v) and float(v) != 0:
-            return float(v)
-        return COUNTY_COORDS.get(row["county"], (23.8, 121.0))[0]
-
-    def _lon(row):
-        v = row.get("home_lon")
-        if v and pd.notna(v) and float(v) != 0:
-            return float(v)
-        return COUNTY_COORDS.get(row["county"], (23.8, 121.0))[1]
-
-    plot_df["_lat"] = plot_df.apply(_lat, axis=1)
-    plot_df["_lon"] = plot_df.apply(_lon, axis=1)
+    plot_df["_lat"] = lat_col
+    plot_df["_lon"] = lon_col
     plot_df["days_ago"] = plot_df["date"].apply(
-        lambda d: (today - d).days if pd.notna(d) else 999
+        lambda d: (today - d).days if pd.notna(d) else 9999
     )
 
-    # 時間分層：(標籤, 最小天, 最大天, 透明度, 點大小)
-    BUCKETS = [
-        ("近 3 天",  0,   3,  1.00, 10),
-        ("4–7 天",   4,   7,  0.65,  8),
-        ("8–14 天",  8,  14,  0.35,  7),
-        ("15–30 天", 15, 30,  0.18,  6),
-        ("30+ 天",   31, 999, 0.09,  5),
-    ]
+    # 每種疾病的漸層色階：[老 → 近] = [淺透明 → 深不透明]
+    DISEASE_SCALES = {
+        "COVID-19":  [[0, "rgba(255,205,210,0.15)"], [0.45, "#EF5350"], [1, "#B71C1C"]],
+        "Dengue":    [[0, "rgba(255,236,179,0.15)"], [0.45, "#FB8C00"], [1, "#E65100"]],
+        "Influenza": [[0, "rgba(187,222,251,0.15)"], [0.45, "#1E88E5"], [1, "#0D47A1"]],
+    }
 
     fig = go.Figure()
-    for label, d_min, d_max, opacity, sz in BUCKETS:
-        mask = (plot_df["days_ago"] >= d_min) & (plot_df["days_ago"] <= d_max)
-        sub  = plot_df[mask]
-        if sub.empty:
-            continue
-        for disease in sub["disease"].unique():
-            dsub = sub[sub["disease"] == disease]
-            base_color = DISEASE_COLORS.get(disease, "#888888")
-            date_strs  = [
-                r.strftime("%m/%d") if pd.notna(r) else ""
-                for r in dsub["report_date"]
-            ]
-            fig.add_trace(go.Scattermapbox(
-                lat=dsub["_lat"].tolist(),
-                lon=dsub["_lon"].tolist(),
-                mode="markers",
-                marker=dict(size=sz, color=base_color, opacity=opacity),
-                name=f"{DISEASE_ZH.get(disease, disease)} · {label}",
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    f"疾病：{DISEASE_ZH.get(disease, disease)}<br>"
-                    "縣市：%{customdata[1]}<br>"
-                    "通報日：%{customdata[2]}<extra></extra>"
-                ),
-                customdata=list(zip(
-                    dsub["patient_name"].tolist(),
-                    dsub["county"].tolist(),
-                    date_strs,
-                )),
-                legendgroup=disease,
-            ))
+    valid = plot_df[plot_df["days_ago"] < 9999]
+    if valid.empty:
+        return _empty_map(height)
+
+    for disease in [d for d in list(DISEASE_ZH) if d in valid["disease"].unique()]:
+        dsub = valid[valid["disease"] == disease].copy()
+        d_min = float(dsub["days_ago"].min())
+        d_max = float(dsub["days_ago"].max())
+        span  = max(d_max - d_min, 1.0)
+
+        # norm_recency: 1=最新 (days_ago=d_min), 0=最舊 (days_ago=d_max)
+        norm = 1.0 - (dsub["days_ago"].astype(float) - d_min) / span
+        sizes = (9 + 8 * norm).tolist()      # 9–17 px，近期更大
+
+        date_strs = [
+            r.strftime("%m/%d") if pd.notna(r) else ""
+            for r in dsub["report_date"]
+        ]
+
+        fig.add_trace(go.Scattermapbox(
+            lat=dsub["_lat"].tolist(),
+            lon=dsub["_lon"].tolist(),
+            mode="markers",
+            marker=dict(
+                size=sizes,
+                color=norm.tolist(),       # 0–1 浮點，映射到 colorscale
+                colorscale=DISEASE_SCALES[disease],
+                cmin=0, cmax=1,
+                showscale=False,           # 不顯示 colorbar
+                opacity=0.9,
+            ),
+            name=f"{DISEASE_EMOJI.get(disease,'')} {DISEASE_ZH.get(disease,disease)}",
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                f"疾病：{DISEASE_ZH.get(disease, disease)}<br>"
+                "縣市：%{customdata[1]}<br>"
+                "通報日：%{customdata[2]}　距今 %{customdata[3]} 天<extra></extra>"
+            ),
+            customdata=list(zip(
+                dsub["patient_name"].tolist(),
+                dsub["county"].tolist(),
+                date_strs,
+                dsub["days_ago"].astype(int).tolist(),
+            )),
+            legendgroup=disease,
+        ))
 
     fig.update_layout(
         mapbox=dict(
@@ -494,12 +509,16 @@ def make_temporal_map(df: pd.DataFrame, disease_filter: str = "全部",
             zoom=6,
             bounds=_TW_BOUNDS,
         ),
-        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        margin={"l": 0, "r": 0, "t": 36, "b": 0},
         height=height,
-        title=dict(text="🕐 疾病擴散時間軸（顏色深 = 越近期）", font_size=13, y=0.97),
+        title=dict(text="🕐 病患居住地 — 時間擴散漸層（深色=最近期，淺色=最早期）",
+                   font_size=13, y=0.98),
         legend=dict(
             orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
-            **_LEGEND_STYLE,
+            font=dict(size=13, color="#111"),
+            bgcolor="rgba(255,255,255,0.88)",
+            bordercolor="rgba(0,0,0,0.08)", borderwidth=1,
+            itemclick="toggle", itemdoubleclick="toggleothers",
         ),
     )
     return fig
@@ -540,14 +559,28 @@ def make_trend_figure(df: pd.DataFrame, days: int = 14,
     return fig
 
 
+def _bar_legend() -> dict:
+    """共用的大字型圖例設定（方便點選）"""
+    return dict(
+        orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+        font=dict(size=14, color="#111"),
+        bgcolor="rgba(255,255,255,0.0)",
+        itemclick="toggle", itemdoubleclick="toggleothers",
+    )
+
+
 def make_county_bar(df: pd.DataFrame) -> go.Figure:
+    """各縣市疾病堆疊橫條圖（大字型圖例，可點選切換）"""
     if df.empty:
         return go.Figure()
+    diseases_in_df = df["disease"].unique()
     cc = df.groupby(["county", "disease"]).size().reset_index(name="count")
     ct = cc.groupby("county")["count"].sum().sort_values(ascending=True)
     ordered = ct.index.tolist()
     fig = go.Figure()
     for d in list(DISEASE_ZH):
+        if d not in diseases_in_df:
+            continue
         sub = cc[cc["disease"] == d].set_index("county")
         fig.add_trace(go.Bar(
             y=ordered, orientation="h",
@@ -562,8 +595,46 @@ def make_county_bar(df: pd.DataFrame) -> go.Figure:
         xaxis_title="案例數",
         height=max(380, len(ordered) * 22 + 80),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=80, r=20, t=50, b=40),
+        legend=_bar_legend(),
+        margin=dict(l=80, r=20, t=60, b=40),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    return fig
+
+
+def make_hospital_bar(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
+    """各通報院所疾病堆疊橫條圖（格式與縣市圖一致）"""
+    if df.empty:
+        return go.Figure()
+    hdf = df.dropna(subset=["hospital_name"])
+    hdf = hdf[hdf["hospital_name"] != ""]
+    if hdf.empty:
+        return go.Figure()
+    diseases_in_df = hdf["disease"].unique()
+    cc = hdf.groupby(["hospital_name", "disease"]).size().reset_index(name="count")
+    ct = (cc.groupby("hospital_name")["count"].sum()
+          .sort_values(ascending=True).tail(top_n))
+    ordered = ct.index.tolist()
+    fig = go.Figure()
+    for d in list(DISEASE_ZH):
+        if d not in diseases_in_df:
+            continue
+        sub = cc[cc["disease"] == d].set_index("hospital_name")
+        fig.add_trace(go.Bar(
+            y=ordered, orientation="h",
+            x=[sub.loc[h, "count"] if h in sub.index else 0 for h in ordered],
+            name=f"{DISEASE_EMOJI[d]} {DISEASE_ZH[d]}",
+            marker_color=DISEASE_COLORS[d],
+            hovertemplate="%{y}：%{x} 例<extra></extra>",
+        ))
+    fig.update_layout(
+        barmode="stack",
+        title=dict(text=f"通報院所前 {top_n} 名", font_size=14),
+        xaxis_title="案例數",
+        height=max(380, len(ordered) * 22 + 80),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=_bar_legend(),
+        margin=dict(l=130, r=20, t=60, b=40),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
     return fig
@@ -911,45 +982,57 @@ def main():
     # ── Tab 1：地理分布 ─────────────────────────────────────────────────────────
     with tab_map:
         with st.container(height=TAB_H, border=False):
-            map_mode = st.radio(
-                "地圖類型",
-                ["🗺️ 縣市累積分布", "🏥 通報院所熱點", "🏠 病患居住地（時間擴散）"],
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-            MAP_H = 470   # 扣掉 radio 按鈕列高度
+            # ── 第一列：地圖模式 + 疾病 toggle（左右分置） ──────────────────
+            r1, r2 = st.columns([3, 2])
+            with r1:
+                map_mode = st.radio(
+                    "地圖類型",
+                    ["🗺️ 縣市累積分布", "🏥 通報院所熱點", "🏠 病患居住地（時間擴散）"],
+                    horizontal=True, label_visibility="collapsed",
+                )
+            with r2:
+                tc1, tc2, tc3 = st.columns(3)
+                s_covid  = tc1.checkbox(f"{DISEASE_EMOJI['COVID-19']} COVID-19",
+                                        value=True, key="map_d_covid")
+                s_dengue = tc2.checkbox(f"{DISEASE_EMOJI['Dengue']} 登革熱",
+                                        value=True, key="map_d_dengue")
+                s_flu    = tc3.checkbox(f"{DISEASE_EMOJI['Influenza']} 流感",
+                                        value=True, key="map_d_flu")
+
+            sel_d = [d for d, s in [
+                ("COVID-19", s_covid), ("Dengue", s_dengue), ("Influenza", s_flu)
+            ] if s] or list(DISEASE_ZH)  # 若全取消，退回顯示全部
+
+            # 依 checkbox 過濾（以 df_all 為基底，保留 status 過濾）
+            base = df_all.copy()
+            if status_val != "全部":
+                base = base[base["status"] == status_val]
+            map_df = base[base["disease"].isin(sel_d)]
+
+            MAP_H = 450
 
             if map_mode == "🗺️ 縣市累積分布":
                 mc, bc = st.columns([3, 2])
                 with mc:
-                    st.plotly_chart(make_map_figure(df, disease_val, MAP_H),
+                    st.plotly_chart(make_map_figure(map_df, "全部", MAP_H),
                                     use_container_width=True, config={"scrollZoom": True})
                 with bc:
-                    st.plotly_chart(make_county_bar(df), use_container_width=True)
+                    st.plotly_chart(make_county_bar(map_df), use_container_width=True)
 
             elif map_mode == "🏥 通報院所熱點":
                 mc, ic = st.columns([3, 2])
                 with mc:
-                    st.plotly_chart(make_hospital_map(df, disease_val, MAP_H),
+                    st.plotly_chart(make_hospital_map(map_df, "全部", MAP_H),
                                     use_container_width=True, config={"scrollZoom": True})
                 with ic:
-                    st.markdown("**前 10 通報院所**")
-                    if "hospital_name" in df.columns:
-                        top_h = (df[df["hospital_name"].notna() & (df["hospital_name"] != "")]
-                                 .groupby("hospital_name").size()
-                                 .sort_values(ascending=False).head(10)
-                                 .reset_index())
-                        top_h.columns = ["院所", "案例數"]
-                        st.dataframe(top_h, use_container_width=True, hide_index=True)
-                    else:
-                        st.caption("尚無院所資料，請重新 seed 或等候引擎更新")
+                    st.plotly_chart(make_hospital_bar(map_df), use_container_width=True)
 
             else:  # 時間擴散
-                st.plotly_chart(make_temporal_map(df, disease_val, MAP_H),
+                st.plotly_chart(make_temporal_map(map_df, MAP_H),
                                 use_container_width=True, config={"scrollZoom": True})
                 st.caption(
-                    "📍 點位為病患居住地 | 顏色深淺代表通報時間遠近 | "
-                    "可放大地圖觀察疾病擴散軌跡"
+                    "📍 點位為病患居住地 | 每種疾病顏色在自身時間範圍內正規化 "
+                    "（深色=該疾病最近案例，淺色=最早案例）| 點選圖例切換顯示"
                 )
 
     # ── Tab 2：趨勢分析 ─────────────────────────────────────────────────────────
