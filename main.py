@@ -4,10 +4,10 @@ G5 傳染病公衛監測系統 — CLI 入口
 使用方式（建議以 uv 執行）：
 
   uv run python main.py              # 互動選單
-  uv run python main.py seed         # 注入假資料
+  uv run python main.py seed         # 手動注入假資料（需要時才執行）
   uv run python main.py dashboard    # 啟動儀表板
   uv run python main.py engine       # 啟動 MedMorph 引擎
-  uv run python main.py all          # 全部一鍵啟動
+  uv run python main.py all          # 一鍵啟動 engine + dashboard（不含 seed）
 """
 
 import sys
@@ -15,11 +15,11 @@ import subprocess
 
 
 COMMANDS = {
-    "seed": ("注入假資料", ["python", "seed_data.py"]),
-    "dashboard": ("啟動 Streamlit 儀表板", ["python", "-m", "streamlit", "run", "dashboard.py"]),
-    "engine": ("啟動 MedMorph 引擎（持續輪詢）", ["python", "medmorph_engine.py"]),
-    "all": ("全部一鍵啟動（seed + engine + dashboard）", ["python", "run_all.py"]),
-    "eicr": ("產生範例 eICR JSON", ["python", "eicr_generator.py"]),
+    "seed":      ("手動注入假資料（需要時才執行）",         ["python", "seed_data.py"]),
+    "dashboard": ("啟動 Streamlit 儀表板",                  ["python", "-m", "streamlit", "run", "dashboard.py"]),
+    "engine":    ("啟動 MedMorph 引擎（持續輪詢）",         ["python", "medmorph_engine.py"]),
+    "all":       ("一鍵啟動 engine + dashboard（不含 seed）", ["python", "run_all.py"]),
+    "eicr":      ("產生範例 eICR JSON",                      ["python", "eicr_generator.py"]),
 }
 
 

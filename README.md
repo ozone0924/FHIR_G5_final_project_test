@@ -76,7 +76,9 @@ pip install -r requirements.txt
 
 ---
 
-### Step 4：注入假資料
+### Step 4：（選做）注入假資料
+
+> 僅在初次使用、或需要重置 demo 資料時執行。正常使用由 MedMorph 引擎即時產生案例，無需手動 seed。
 
 ```bash
 python seed_data.py
@@ -120,7 +122,7 @@ python medmorph_engine.py
 
 ### 一鍵啟動（選做）
 
-以上步驟也可以用 `run_all.py` 一次完成：
+啟動 MedMorph 引擎 + 儀表板（不含 seed）：
 
 **Windows**
 ```powershell
@@ -130,6 +132,11 @@ python run_all.py
 **Mac / Linux**
 ```bash
 python3 run_all.py
+```
+
+若需同時注入假資料：
+```bash
+python3 run_all.py --seed
 ```
 
 ---
@@ -188,7 +195,7 @@ A：確認虛擬環境已啟動（終端機前有 `(venv)`），再重新執行�
 A：改用 `python3`。
 
 **Q：儀表板顯示「目前沒有符合條件的案例」**  
-A：先執行 `python seed_data.py` 注入資料。
+A：MedMorph 引擎需時間產生案例。若需立即看到資料，手動執行 `python seed_data.py` 注入 demo 資料。
 
 **Q：Port 8501 已被佔用**  
 A：改用其他 port：`streamlit run dashboard.py --server.port 8502`
