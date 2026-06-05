@@ -1,0 +1,279 @@
+{
+  "resourceType": "Bundle",
+  "id": "7d04f026-f901-4cae-961a-c636a81b3123",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-document-bundle"
+    ],
+    "lastUpdated": "2026-06-05T06:30:58Z"
+  },
+  "type": "document",
+  "timestamp": "2026-06-05T06:30:58Z",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:122aa36f-7139-417b-b2d5-dd85a141026e",
+      "resource": {
+        "resourceType": "Composition",
+        "id": "122aa36f-7139-417b-b2d5-dd85a141026e",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-composition"
+          ]
+        },
+        "status": "preliminary",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "55751-2",
+              "display": "Public health case report - PHRI"
+            }
+          ]
+        },
+        "subject": {
+          "reference": "Patient/patient-c4d12203af"
+        },
+        "encounter": {
+          "reference": "Encounter/9074d076-ba0e-4f92-b3e7-d3f345865095"
+        },
+        "date": "2026-05-28T22:38:58Z",
+        "author": [
+          {
+            "reference": "Organization/org-tw-cdc"
+          }
+        ],
+        "title": "eICR - Influenza 疑似病例通報",
+        "section": [
+          {
+            "title": "Chief Complaint",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10154-3",
+                  "display": "Chief complaint Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "generated",
+              "div": "<div xmlns='http://www.w3.org/1999/xhtml'>主訴：發燒、流鼻水、全身無力</div>"
+            }
+          },
+          {
+            "title": "Reportable Conditions",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "55752-0",
+                  "display": "Reportable condition"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Condition/216b30f4-5bec-46c6-9d1b-4d21d4db9ee8"
+              }
+            ]
+          },
+          {
+            "title": "Results",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "30954-2",
+                  "display": "Relevant diagnostic tests/laboratory data Narrative"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Observation/d21c9425-a752-4b25-ad93-57e895f929f5"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Patient/patient-c4d12203af",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-c4d12203af",
+        "name": [
+          {
+            "use": "official",
+            "text": "王彥廷"
+          }
+        ],
+        "birthDate": "2008-03-25",
+        "gender": "female",
+        "telecom": [],
+        "address": [
+          {
+            "use": "home",
+            "district": "新北市",
+            "country": "TW"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Condition/216b30f4-5bec-46c6-9d1b-4d21d4db9ee8",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "216b30f4-5bec-46c6-9d1b-4d21d4db9ee8",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-condition"
+          ]
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "suspected",
+              "display": "Suspected"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+              "code": "provisional"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                "code": "encounter-diagnosis",
+                "display": "Encounter Diagnosis"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "57386000",
+              "display": "Influenza (disorder)"
+            }
+          ],
+          "text": "Influenza"
+        },
+        "subject": {
+          "reference": "Patient/patient-c4d12203af"
+        },
+        "onsetDateTime": "2026-05-28T22:38:58Z",
+        "recordedDate": "2026-06-05T06:30:58Z"
+      }
+    },
+    {
+      "fullUrl": "Observation/d21c9425-a752-4b25-ad93-57e895f929f5",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "d21c9425-a752-4b25-ad93-57e895f929f5",
+        "status": "preliminary",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory",
+                "display": "Laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "92142-9",
+              "display": "Influenza virus A RNA panel"
+            }
+          ],
+          "text": "Influenza 檢驗"
+        },
+        "subject": {
+          "reference": "Patient/patient-c4d12203af"
+        },
+        "effectiveDateTime": "2026-05-28T22:38:58Z",
+        "valueCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "52101004",
+              "display": "Present"
+            }
+          ],
+          "text": "發燒、流鼻水、全身無力"
+        }
+      }
+    },
+    {
+      "fullUrl": "Encounter/9074d076-ba0e-4f92-b3e7-d3f345865095",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "9074d076-ba0e-4f92-b3e7-d3f345865095",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "11429006",
+                "display": "Consultation"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/patient-c4d12203af"
+        },
+        "period": {
+          "start": "2026-05-28T22:38:58Z",
+          "end": "2026-05-28T22:38:58Z"
+        }
+      }
+    },
+    {
+      "fullUrl": "Organization/org-tw-cdc",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-tw-cdc",
+        "name": "衛生福利部疾病管制署",
+        "alias": [
+          "Taiwan CDC"
+        ],
+        "telecom": [
+          {
+            "system": "url",
+            "value": "https://www.cdc.gov.tw"
+          }
+        ],
+        "address": [
+          {
+            "line": [
+              "林森北路161號"
+            ],
+            "city": "台北市",
+            "country": "TW"
+          }
+        ]
+      }
+    }
+  ]
+}
