@@ -1238,12 +1238,12 @@ def main():
             st.info("⚠️ 此日期範圍內沒有符合條件的案例。請調整日期範圍或至「⚙️ 設定」修改篩選條件。")
         else:
             CASES_LIST_H = TAB_H - 110
-            list_col, view_col = st.columns([0.40, 0.60], gap="small")
+            list_col, view_col = st.columns([0.50, 0.50], gap="small")
 
             with list_col:
                 with st.container(height=CASES_LIST_H, border=True):
-                    COLS = [0.28, 1.55, 1.45, 1.15, 1.05, 0.72]
-                    hcols = st.columns(COLS)
+                    COLS = [0.20, 0.90, 1.45, 0.90, 0.82, 0.58]
+                    hcols = st.columns(COLS, gap="small")
                     for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
                         extra = "text-align:center;white-space:nowrap;" if lbl == "通報單" else ""
                         col.markdown(
@@ -1260,7 +1260,7 @@ def main():
                         is_sel = (i == sel_idx)
                         hl     = ("border-left:3px solid #4A9EFF;padding-left:4px;"
                                   "color:#4A9EFF !important;" if is_sel else "")
-                        rcols  = st.columns(COLS)
+                        rcols  = st.columns(COLS, gap="small")
                         d_zh   = (f"{DISEASE_EMOJI.get(row['disease'],'')} "
                                   f"{DISEASE_ZH.get(row['disease'], row['disease'])}")
                         s_zh   = STATUS_LABEL.get(row["status"], row["status"])
