@@ -163,25 +163,51 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
             unsafe_allow_html=True,
         )
 
-    # 頂部橫幅
-    st.markdown(
-        f"""
-        <div style="background:linear-gradient(135deg,#003F87,#1a6db5);
-            color:white;border-radius:8px;padding:14px 20px;margin-bottom:12px">
-            <div style="font-size:1.1rem;font-weight:700">
-                🏥 傳染病個案通報單（eICR）
-            </div>
-            <div style="font-size:0.8rem;opacity:0.8;margin-top:2px">
-                {hospital_name} · HL7 FHIR R4 · MedMorph Reference Architecture
-            </div>
-            <div style="display:flex;gap:24px;margin-top:8px;font-size:0.78rem;opacity:0.7">
-                <span>Bundle ID：{eicr["bundle_id"][:8]}…</span>
-                <span>通報時間：{_fmt_dt(eicr["bundle_ts"])}</span>
-                <span>狀態：{eicr["comp_status"].upper()}</span>
-            </div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
+    # 頂部橫幅 + 下載按鈕（同排）
+    hdr_col, dl_col = st.columns([3, 1])
+    with hdr_col:
+        st.markdown(
+            f"""
+            <div style="background:linear-gradient(135deg,#003F87,#1a6db5);
+                color:white;border-radius:8px;padding:10px 16px;margin-bottom:0">
+                <div style="font-size:1.05rem;font-weight:700">
+                    🏥 傳染病個案通報單（eICR）
+                </div>
+                <div style="font-size:0.78rem;opacity:0.8;margin-top:2px">
+                    {hospital_name} · HL7 FHIR R4 · MedMorph
+                </div>
+                <div style="display:flex;gap:16px;margin-top:6px;font-size:0.75rem;opacity:0.7">
+                    <span>Bundle：{eicr["bundle_id"][:8]}…</span>
+                    <span>{_fmt_dt(eicr["bundle_ts"])}</span>
+                    <span>{eicr["comp_status"].upper()}</span>
+                </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    with dl_col:
+        try:
+            pdf_bytes    = generate_eicr_pdf(eicr, hospital_name=hospital_name)
+            patient_name = eicr["patient"]["name"]
+            st.download_button(
+                label="📄 下載 PDF 通報單",
+                data=pdf_bytes,
+                file_name=f"{hospital_name}_傳染病通報單_{patient_name}_{eicr['bundle_id'][:8]}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="dl_pdf",
+            )
+        except Exception as e:
+            st.warning(f"PDF 產生失敗：{e}")
+        st.download_button(
+            label="⬇️ 下載 JSON",
+            data=json.dumps(eicr["_raw"], ensure_ascii=False, indent=2),
+            file_name=f"eicr_{eicr['bundle_id'][:8]}.json",
+            mime="application/json",
+            use_container_width=True,
+            key="dl_json",
+        )
+
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
     # 壹、病患
     section("壹、個案基本資料")
@@ -255,32 +281,6 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
     with st.expander("🔍 原始 eICR Bundle JSON（FHIR R4）"):
         st.code(json.dumps(eicr["_raw"], ensure_ascii=False, indent=2), language="json")
 
-    # 下載按鈕
-    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        st.download_button(
-            label="⬇️ 下載 eICR JSON",
-            data=json.dumps(eicr["_raw"], ensure_ascii=False, indent=2),
-            file_name=f"eicr_{eicr['bundle_id'][:8]}.json",
-            mime="application/json",
-            use_container_width=True,
-            key="dl_json",
-        )
-    with btn_col2:
-        try:
-            pdf_bytes = generate_eicr_pdf(eicr, hospital_name=hospital_name)
-            patient_name = eicr["patient"]["name"]
-            st.download_button(
-                label="📄 下載 PDF 通報單",
-                data=pdf_bytes,
-                file_name=f"{hospital_name}_傳染病通報單_{patient_name}_{eicr['bundle_id'][:8]}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                key="dl_pdf",
-            )
-        except Exception as e:
-            st.warning(f"PDF 產生失敗：{e}")
 
 
 # ── 圖表函式 ──────────────────────────────────────────────────────────────────
