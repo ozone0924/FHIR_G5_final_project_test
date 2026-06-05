@@ -250,7 +250,7 @@ def generate_realistic_cases(days_back: int = 180,
         sigma = duration / 4.0   # epidemic curve width
 
         generated = 0
-        max_attempts = total_target * 8
+        max_attempts = total_target * 30
 
         for _attempt in range(max_attempts):
             if generated >= total_target:
@@ -375,7 +375,28 @@ def seed(count: int = _BASE_COUNT, days_back: int = 180,
     init_db(db_path)
     os.makedirs(output_dir, exist_ok=True)
 
+    # 清空舊資料，確保最終筆數精確等於 count
+    import glob
+    with sqlite3.connect(db_path) as _con:
+        _con.execute("DELETE FROM cases")
+        _con.execute("DELETE FROM submissions")
+        _con.commit()
+    for _f in glob.glob(os.path.join(output_dir, "eicr_*.json")):
+        os.remove(_f)
+
     raw_cases = generate_realistic_cases(days_back=days_back, scale=scale)
+
+    # 若因時間視窗過窄導致實際生成筆數不足，逐輪補齊到精確 count
+    while len(raw_cases) < count:
+        shortage = count - len(raw_cases)
+        adj_scale = (shortage / _BASE_COUNT) * 1.5 + 0.1
+        extra = generate_realistic_cases(days_back=days_back, scale=adj_scale)
+        if not extra:
+            break
+        raw_cases += extra
+
+    random.shuffle(raw_cases)
+    raw_cases = raw_cases[:count]
 
     inserted = 0
     skipped  = 0

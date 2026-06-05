@@ -340,9 +340,17 @@ def _empty_map(height: int = 460) -> go.Figure:
     return fig
 
 
+def _norm_size(series: pd.Series, min_px: int = 8, max_px: int = 35) -> pd.Series:
+    """sqrt 正規化後映射到 [min_px, max_px]，避免大值泡泡過大"""
+    mx = series.max()
+    if mx <= 0:
+        return pd.Series([min_px] * len(series), index=series.index)
+    return min_px + (max_px - min_px) * (series / mx) ** 0.5
+
+
 def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部",
                     height: int = 460) -> go.Figure:
-    """縣市累積泡泡地圖"""
+    """縣市累積泡泡地圖（sqrt 正規化大小，上限 35px）"""
     if df.empty:
         return _empty_map(height)
     plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
@@ -350,20 +358,37 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部",
     grp["lat"]        = grp["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[0])
     grp["lon"]        = grp["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[1])
     grp["disease_zh"] = grp["disease"].map(DISEASE_ZH)
-    ct = grp.groupby("county")["count"].sum().reset_index(name="total")
-    grp = grp.merge(ct, on="county")
-    fig = px.scatter_mapbox(
-        grp, lat="lat", lon="lon", size="total", color="disease",
-        color_discrete_map=DISEASE_COLORS, hover_name="county",
-        hover_data={"disease_zh": True, "count": True,
-                    "lat": False, "lon": False, "total": False},
-        labels={"disease": "疾病", "count": "案例數", "disease_zh": "疾病名稱"},
-        size_max=55, zoom=6, center={"lat": 23.8, "lon": 121.0},
-        mapbox_style="open-street-map", height=height,
-    )
+    # 以所有縣市中最大值為基準做 sqrt 正規化
+    grp["size"] = _norm_size(grp["count"])
+
+    fig = go.Figure()
+    for d in list(DISEASE_ZH):
+        sub = grp[grp["disease"] == d]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scattermapbox(
+            lat=sub["lat"].tolist(), lon=sub["lon"].tolist(),
+            mode="markers",
+            marker=dict(
+                size=sub["size"].tolist(),
+                color=DISEASE_COLORS[d],
+                opacity=0.78,
+                sizemode="diameter",
+            ),
+            name=f"{DISEASE_EMOJI[d]} {DISEASE_ZH[d]}",
+            text=sub["county"].tolist(),
+            customdata=list(zip(sub["disease_zh"], sub["count"])),
+            hovertemplate="<b>%{text}</b><br>疾病=%{customdata[0]}<br>案例數=%{customdata[1]}<extra></extra>",
+        ))
+
     fig.update_layout(
+        mapbox=dict(
+            style="open-street-map", zoom=6,
+            center={"lat": 23.8, "lon": 121.0},
+            bounds=_TW_BOUNDS,
+        ),
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        mapbox=dict(bounds=_TW_BOUNDS),
+        height=height,
         legend=dict(
             title=dict(text="疾病類型", font=dict(color="#222")),
             orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
@@ -375,7 +400,7 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部",
 
 def make_hospital_map(df: pd.DataFrame, disease_filter: str = "全部",
                       height: int = 460) -> go.Figure:
-    """通報醫療院所分布地圖"""
+    """通報醫療院所分布地圖（sqrt 正規化大小，上限 30px）"""
     if df.empty:
         return _empty_map(height)
     plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
@@ -386,25 +411,38 @@ def make_hospital_map(df: pd.DataFrame, disease_filter: str = "全部",
 
     grp = (hdf.groupby(["hospital_name", "hospital_lat", "hospital_lon", "disease"])
              .size().reset_index(name="count"))
-    tot = grp.groupby("hospital_name")["count"].sum().reset_index(name="total")
-    grp = grp.merge(tot, on="hospital_name")
     grp["disease_zh"] = grp["disease"].map(DISEASE_ZH)
+    grp["size"] = _norm_size(grp["count"], min_px=6, max_px=30)
 
-    fig = px.scatter_mapbox(
-        grp, lat="hospital_lat", lon="hospital_lon",
-        size="total", color="disease",
-        color_discrete_map=DISEASE_COLORS,
-        hover_name="hospital_name",
-        hover_data={"disease_zh": True, "count": True,
-                    "hospital_lat": False, "hospital_lon": False, "total": False},
-        labels={"disease": "疾病", "count": "案例數", "disease_zh": "疾病"},
-        size_max=50, zoom=6, center={"lat": 23.8, "lon": 121.0},
-        mapbox_style="open-street-map", height=height,
-    )
+    fig = go.Figure()
+    for d in list(DISEASE_ZH):
+        sub = grp[grp["disease"] == d]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scattermapbox(
+            lat=sub["hospital_lat"].tolist(), lon=sub["hospital_lon"].tolist(),
+            mode="markers",
+            marker=dict(
+                size=sub["size"].tolist(),
+                color=DISEASE_COLORS[d],
+                opacity=0.78,
+                sizemode="diameter",
+            ),
+            name=f"{DISEASE_EMOJI[d]} {DISEASE_ZH[d]}",
+            text=sub["hospital_name"].tolist(),
+            customdata=list(zip(sub["disease_zh"], sub["count"])),
+            hovertemplate="<b>%{text}</b><br>疾病=%{customdata[0]}<br>案例數=%{customdata[1]}<extra></extra>",
+        ))
+
     fig.update_layout(
+        mapbox=dict(
+            style="open-street-map", zoom=6,
+            center={"lat": 23.8, "lon": 121.0},
+            bounds=_TW_BOUNDS,
+        ),
         margin={"l": 0, "r": 0, "t": 30, "b": 0},
         title=dict(text="🏥 通報醫療院所（泡泡大小 = 通報數）", font_size=13, y=0.97),
-        mapbox=dict(bounds=_TW_BOUNDS),
+        height=height,
         legend=dict(
             title=dict(text="疾病類型", font=dict(color="#222")),
             orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
