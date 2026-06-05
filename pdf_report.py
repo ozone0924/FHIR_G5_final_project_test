@@ -32,9 +32,13 @@ def _prepare_font() -> str | None:
         if not os.path.exists(path):
             continue
         try:
-            from fontTools.ttLib import TTCollection
-            ttc = TTCollection(path)
-            font = ttc.fonts[idx]
+            from fontTools.ttLib import TTCollection, TTFont
+            if path.lower().endswith(('.ttc', '.otc')):
+                ttc = TTCollection(path)
+                font = ttc.fonts[idx]
+            else:
+                # 處理 .ttf 或 .otf
+                font = TTFont(path)
             buf = io.BytesIO()
             font.save(buf)
             tmp = tempfile.NamedTemporaryFile(
