@@ -3,14 +3,16 @@ run_all.py — 一鍵啟動腳本
 ===========================
 步驟：
   1. 確認套件已安裝（uv sync 或 pip install）
-  2. 注入假資料（seed_data）
-  3. 背景啟動 MedMorph 引擎
-  4. 前景啟動 Streamlit 儀表板
+  2. 背景啟動 MedMorph 引擎
+  3. 前景啟動 Streamlit 儀表板
+
+注意：seed_data 預設不執行，需手動執行：
+  uv run python seed_data.py
 
 使用方式：
   uv run python run_all.py              # 建議（自動用 .venv）
   python run_all.py
-  python run_all.py --skip-seed         # 不重新注入假資料
+  python run_all.py --seed              # 明確要求注入假資料
   python run_all.py --skip-engine       # 只跑儀表板
   python run_all.py --port 8502         # 指定 port
 """
@@ -67,11 +69,11 @@ def seed_data(count: int = 150, days: int = 30):
 
 def main():
     parser = argparse.ArgumentParser(description="傳染病公衛監測系統 — 一鍵啟動")
-    parser.add_argument("--skip-seed",   action="store_true", help="跳過假資料注入")
+    parser.add_argument("--seed",        action="store_true", help="注入假資料（預設不執行）")
     parser.add_argument("--skip-engine", action="store_true", help="跳過 MedMorph 引擎")
     parser.add_argument("--port",        type=int, default=8501, help="Streamlit port（預設 8501）")
-    parser.add_argument("--count",       type=int, default=150,  help="假資料筆數（預設 150）")
-    parser.add_argument("--days",        type=int, default=30,   help="資料涵蓋天數（預設 30）")
+    parser.add_argument("--count",       type=int, default=150,  help="假資料筆數（預設 150，需搭配 --seed）")
+    parser.add_argument("--days",        type=int, default=30,   help="資料涵蓋天數（預設 30，需搭配 --seed）")
     args = parser.parse_args()
 
     print("=" * 50)
@@ -80,8 +82,10 @@ def main():
 
     ensure_deps()
 
-    if not args.skip_seed:
+    if args.seed:
         seed_data(count=args.count, days=args.days)
+    else:
+        print("\n⏭  略過假資料注入（加 --seed 旗標可手動觸發）")
 
     processes = []
 
