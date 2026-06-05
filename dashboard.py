@@ -967,16 +967,35 @@ def main():
 
     /* ═══ Tab 按鈕 ═══ */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 6px; background: transparent;
+        gap: 4px; background: transparent;
         border-bottom: 2px solid #E0E6F0;
         padding-bottom: 0; margin-bottom: 0;
+        /* 先讓 tab 自動縮排；真的塞不下才 scroll（不顯示捲動列） */
+        overflow-x: auto !important;
+        scrollbar-width: none !important;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+        display: none !important;
+    }
+    /* 隱藏 baseweb 自動產生的左右 overflow 箭頭 */
+    .stTabs [data-baseweb="tab-list"] > button[aria-label],
+    .stTabs [data-baseweb="tab-list"] > div > button[aria-label] {
+        display: none !important;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 44px; min-width: 130px; padding: 0 16px;
+        height: 44px;
+        /* 取消固定最小寬，允許 flex 縮小 */
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
+        /* padding 跟隨視窗寬度等比縮小，最小 6px，最大 16px */
+        padding: 0 clamp(6px, 1.4vw, 16px) !important;
         background: #F0F4FA; border-radius: 10px 10px 0 0;
         border: 1.5px solid #D0DBF0; border-bottom: none;
-        font-size: 0.95rem !important; font-weight: 600 !important;
+        /* 字型隨視窗等比縮小，最小 0.68rem，最大 0.95rem */
+        font-size: clamp(0.68rem, 1.3vw, 0.95rem) !important;
+        font-weight: 600 !important;
         color: #4A6FA5 !important; transition: background 0.2s, color 0.2s;
+        white-space: nowrap !important;
     }
     .stTabs [data-baseweb="tab"]:hover {
         background: #E3EBF8; color: #003F87 !important;
