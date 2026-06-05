@@ -655,139 +655,101 @@ def load_submissions(db_path: str) -> pd.DataFrame:
 
 # ── MedMorph 工作流程圖 ────────────────────────────────────────────────────────
 
-def make_pipeline_figure() -> go.Figure:
-    """G1→G5 整體 Pipeline 流程概覽"""
-    groups = [
-        ("G1", "病患\n對話",       "#5C6BC0"),
-        ("G2", "FHIR\n資料庫",    "#1565C0"),
-        ("G3", "CQL\n決策引擎",   "#0277BD"),
-        ("G4", "群聚\n分析",       "#00838F"),
-        ("G5 ★", "自動通報\n公衛儀表板", "#C62828"),
+def pipeline_html() -> str:
+    """G1→G5 整體 Pipeline HTML（取代 Plotly 以避免 axref 版本相容問題）"""
+    boxes = [
+        ("G1",    "病患對話",              "#5C6BC0", "第一組"),
+        ("G2",    "FHIR 資料庫",           "#1565C0", "第二組"),
+        ("G3",    "CQL 決策引擎",          "#0277BD", "第三組"),
+        ("G4",    "群聚分析",              "#00838F", "第四組"),
+        ("G5 ★",  "自動通報<br>公衛儀表板", "#C62828", "第五組（本組）"),
     ]
-    subtitles = ["第一組", "第二組", "第三組", "第四組", "第五組（本組）"]
-    n  = len(groups)
-    xs = [(i + 0.5) / n for i in range(n)]
-    fig = go.Figure()
-
-    for i, ((tag, label, color), x) in enumerate(zip(groups, xs)):
-        is_cur = (i == n - 1)
-        fig.add_shape(type="rect",
-            x0=x - 0.08, y0=0.20, x1=x + 0.08, y1=0.82,
-            fillcolor=color,
-            line=dict(color="#FFD700" if is_cur else "rgba(255,255,255,0.4)",
-                      width=3 if is_cur else 1))
-        fig.add_annotation(x=x, y=0.72, text=f"<b>{tag}</b>",
-            font=dict(color="white", size=12), showarrow=False)
-        fig.add_annotation(x=x, y=0.47, text=label,
-            font=dict(color="rgba(255,255,255,0.88)", size=9.5), showarrow=False)
-        fig.add_annotation(x=x, y=0.08, text=subtitles[i],
-            font=dict(color="#777", size=8), showarrow=False)
-        if i < n - 1:
-            nx = xs[i + 1]
-            fig.add_annotation(
-                x=nx - 0.085, y=0.51, ax=x + 0.085, ay=0.51,
-                xref="paper", yref="paper", axref="paper", ayref="paper",
-                arrowhead=2, arrowcolor="#aaa", arrowwidth=2,
-                showarrow=True, text="",
-            )
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False, range=[0, 1]),
-        yaxis=dict(visible=False, range=[0, 1]),
-        height=135, margin=dict(l=5, r=5, t=5, b=5),
-    )
-    return fig
-
-
-def make_sequence_figure() -> go.Figure:
-    """MedMorph 自動通報序列圖（含 Phase A/B 標注）"""
-    entities = [
-        ("FHIR/CQL\n(G2-G3)",  "#1565C0"),
-        ("MedMorph\n引擎",      "#C62828"),
-        ("eICR\n產生器",        "#2E7D32"),
-        ("SQLite/\n儀表板",     "#E65100"),
-        ("NSSP\n公衛端點",      "#6A1B9A"),
-    ]
-    n  = len(entities)
-    xs = [(i + 0.5) / n for i in range(n)]
-
-    fig = go.Figure()
-    fig.add_shape(type="rect", x0=0, y0=0, x1=1, y1=1,
-                  fillcolor="rgba(248,250,255,0.6)", line_width=0)
-
-    # Phase 背景色帶
-    for y0, y1, label, bg in [
-        (0.72, 0.96, "Phase A  觸發與產生", "rgba(227,242,253,0.55)"),
-        (0.30, 0.72, "Phase B  送出與追蹤", "rgba(232,245,233,0.55)"),
-        (0.00, 0.30, "Phase C  狀態更新",   "rgba(255,248,225,0.55)"),
-    ]:
-        fig.add_shape(type="rect", x0=0.035, y0=y0, x1=1, y1=y1,
-                      fillcolor=bg, line_width=0)
-        fig.add_annotation(
-            x=0.008, y=(y0 + y1) / 2, text=label,
-            font=dict(size=8, color="#555"), showarrow=False,
-            xanchor="left", textangle=-90,
+    items = []
+    for i, (tag, label, color, sub) in enumerate(boxes):
+        last = i == len(boxes) - 1
+        border = "border:3px solid #FFD700;box-shadow:0 0 14px rgba(255,215,0,0.35);" if last else "border:1px solid rgba(255,255,255,0.2);"
+        items.append(
+            f"<div style='background:{color};color:white;border-radius:10px;"
+            f"padding:12px 16px;text-align:center;min-width:96px;{border}'>"
+            f"<div style='font-size:1.05rem;font-weight:700'>{tag}</div>"
+            f"<div style='font-size:0.8rem;margin-top:3px;opacity:0.9'>{label}</div>"
+            f"<div style='font-size:0.68rem;margin-top:5px;opacity:0.6'>{sub}</div>"
+            f"</div>"
         )
-
-    # 實體框 + 生命線
-    for (name, color), x in zip(entities, xs):
-        fig.add_shape(type="rect",
-            x0=x - 0.07, y0=0.92, x1=x + 0.07, y1=0.995,
-            fillcolor=color, line_width=0)
-        fig.add_annotation(x=x, y=0.957, text=f"<b>{name}</b>",
-            font=dict(color="white", size=7.5), showarrow=False)
-        fig.add_shape(type="line",
-            x0=x, y0=0, x1=x, y1=0.92,
-            line=dict(color=color, width=1, dash="dot"))
-
-    # 訊息序列
-    # (from_idx, to_idx, y, label)
-    msgs = [
-        (0, 1, 0.86, "① Condition (suspected) 偵測，觸發 PlanDefinition"),
-        (1, 2, 0.78, "② 啟動 eICR 建立流程"),
-        (2, 1, 0.70, "③ FHIR R4 Bundle 回傳"),
-        (1, 3, 0.62, "④ 案例寫入 SQLite DB"),
-        (1, 1, 0.55, "⑤ Task (requested) 建立"),
-        (1, 4, 0.47, "⑥ POST eICR → NSSP（Task: in-progress）"),
-        (4, 1, 0.38, "⑦ Acknowledgement 回傳"),
-        (1, 1, 0.31, "⑧ Task (completed) + Communication 建立"),
-        (1, 3, 0.22, "⑨ DocumentReference 版本歷史記錄"),
-        (3, 3, 0.12, "⑩ 儀表板自動刷新（每 15 秒）"),
-    ]
-    entity_colors = [e[1] for e in entities]
-
-    for from_i, to_i, y, label in msgs:
-        fx = xs[from_i]; tx = xs[to_i]
-        color = entity_colors[from_i]
-        if from_i == to_i:
-            # 自訊息：小矩形
-            fig.add_shape(type="rect",
-                x0=fx, y0=y - 0.022, x1=fx + 0.055, y1=y + 0.022,
-                fillcolor="rgba(255,255,255,0.88)",
-                line=dict(color=color, width=1))
-            fig.add_annotation(x=fx + 0.028, y=y, text=label,
-                font=dict(size=7.5, color=color), showarrow=False)
-        else:
-            fig.add_annotation(
-                x=tx, y=y, ax=fx, ay=y,
-                xref="paper", yref="paper", axref="paper", ayref="paper",
-                arrowhead=2, arrowcolor=color, arrowwidth=1.5,
-                showarrow=True, text="",
-            )
-            fig.add_annotation(
-                x=(fx + tx) / 2, y=y + 0.028, text=label,
-                font=dict(size=8, color=color), showarrow=False,
-                bgcolor="rgba(255,255,255,0.78)", borderpad=2,
-            )
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(visible=False, range=[0, 1]),
-        yaxis=dict(visible=False, range=[0, 1]),
-        height=490, margin=dict(l=40, r=5, t=5, b=5),
+        if not last:
+            items.append("<div style='font-size:1.8rem;color:#aaa;padding:0 6px;align-self:center'>→</div>")
+    return (
+        "<div style='display:flex;align-items:stretch;justify-content:center;"
+        "padding:10px 4px;gap:0;flex-wrap:nowrap'>"
+        + "".join(items) +
+        "</div>"
     )
-    return fig
+
+
+def sequence_html() -> str:
+    """MedMorph 通報序列 HTML 表格（Phase A/B/C 標注）"""
+    E = {
+        "FHIR/CQL":    "#1565C0",
+        "MedMorph引擎": "#C62828",
+        "eICR產生器":   "#2E7D32",
+        "SQLite/儀表板": "#E65100",
+        "NSSP":         "#6A1B9A",
+    }
+
+    def badge(name: str) -> str:
+        c = E.get(name, "#888")
+        return (f"<span style='background:{c};color:white;padding:2px 7px;"
+                f"border-radius:4px;font-size:0.72rem;white-space:nowrap'>{name}</span>")
+
+    phases = [
+        ("Phase A　觸發與產生", "#EBF5FB", [
+            ("FHIR/CQL",    "MedMorph引擎",  "→", "① Condition (suspected) 偵測，PlanDefinition 觸發"),
+            ("MedMorph引擎", "eICR產生器",    "→", "② 啟動 eICR 建立流程"),
+            ("eICR產生器",   "MedMorph引擎",  "←", "③ FHIR R4 Bundle 回傳"),
+        ]),
+        ("Phase B　送出與追蹤", "#EAFAF1", [
+            ("MedMorph引擎", "SQLite/儀表板", "→", "④ 案例寫入 SQLite DB"),
+            ("MedMorph引擎", "",              "↺", "⑤ Task (requested) 建立"),
+            ("MedMorph引擎", "NSSP",          "→", "⑥ POST eICR → NSSP（Task: in-progress）"),
+            ("NSSP",         "MedMorph引擎",  "←", "⑦ Acknowledgement 回傳"),
+            ("MedMorph引擎", "",              "↺", "⑧ Task (completed) + Communication 建立"),
+        ]),
+        ("Phase C　狀態更新",   "#FEF9E7", [
+            ("MedMorph引擎", "SQLite/儀表板", "→", "⑨ DocumentReference 版本歷史記錄"),
+            ("SQLite/儀表板", "",             "↺", "⑩ 儀表板自動刷新（每 15 秒）"),
+        ]),
+    ]
+
+    rows = []
+    for ph_label, ph_bg, msgs in phases:
+        ph_color = {"A": "#1565C0", "B": "#2E7D32", "C": "#E65100"}.get(ph_label[6], "#888")
+        rows.append(
+            f"<tr><td colspan='4' style='background:{ph_bg};padding:5px 12px;"
+            f"border-left:4px solid {ph_color};font-size:0.79rem;font-weight:700;color:#444'>"
+            f"{ph_label}</td></tr>"
+        )
+        for src, dst, arrow, msg in msgs:
+            rows.append(
+                f"<tr style='border-bottom:1px solid #eee'>"
+                f"<td style='padding:6px 10px'>{badge(src)}</td>"
+                f"<td style='padding:6px 4px;text-align:center;font-size:1.1rem;color:#888'>{arrow}</td>"
+                f"<td style='padding:6px 10px'>{badge(dst) if dst else ''}</td>"
+                f"<td style='padding:6px 14px;font-size:0.82rem;color:#333'>{msg}</td>"
+                f"</tr>"
+            )
+
+    return (
+        "<table style='width:100%;border-collapse:collapse;font-family:sans-serif;"
+        "border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-top:4px'>"
+        "<thead><tr style='background:#2C3E50;color:white'>"
+        "<th style='padding:8px 10px;text-align:left;font-size:0.8rem;white-space:nowrap'>發送方</th>"
+        "<th style='padding:8px 4px;width:28px'></th>"
+        "<th style='padding:8px 10px;text-align:left;font-size:0.8rem;white-space:nowrap'>接收方</th>"
+        "<th style='padding:8px 14px;text-align:left;font-size:0.8rem'>訊息 / 動作</th>"
+        "</tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody>"
+        "</table>"
+    )
 
 
 # ── 主頁面 ─────────────────────────────────────────────────────────────────────
@@ -1170,14 +1132,12 @@ def main():
         with st.container(height=TAB_H, border=False):
             # ── MedMorph 流程圖 ────────────────────────────────────────────────
             st.markdown("#### 🔄 MedMorph 自動通報架構")
-            st.plotly_chart(make_pipeline_figure(), use_container_width=True,
-                            config={"displayModeBar": False})
+            st.markdown(pipeline_html(), unsafe_allow_html=True)
 
             with st.expander("🔍 展開：MedMorph 完整通報序列圖", expanded=True):
                 seq_col, info_col = st.columns([3, 1])
                 with seq_col:
-                    st.plotly_chart(make_sequence_figure(), use_container_width=True,
-                                    config={"displayModeBar": False})
+                    st.markdown(sequence_html(), unsafe_allow_html=True)
                 with info_col:
                     st.markdown("""
 **Phase A — 觸發與產生**
