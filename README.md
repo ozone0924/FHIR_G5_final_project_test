@@ -44,7 +44,7 @@
 ### Step 1：Clone 專案
 
 ```bash
-git clone https://github.com/Saltenfish-cosine/FHIR_G5_final_project_test.git
+git clone https://github.com/ozone0924/FHIR_G5_final_project_test.git
 cd FHIR_G5_final_project_test
 ```
 
