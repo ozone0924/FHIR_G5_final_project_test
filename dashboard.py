@@ -455,6 +455,15 @@ def main():
     [data-testid="stVerticalBlockBorderWrapper"] > div {
         border-radius: 8px;
     }
+
+    /* ═══ 通報單按鈕：emoji 水平置中 ═══ */
+    [data-testid="stButton"] > button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
     </style>""", unsafe_allow_html=True)
 
     # 從 session_state 讀取篩選設定
@@ -462,7 +471,7 @@ def main():
     disease_val      = ss.get("cfg_disease_filter",  "全部")
     status_val       = ss.get("cfg_status_filter",   "全部")
     days_val         = ss.get("cfg_days_range",       14)
-    hospital_name    = ss.get("cfg_hospital",        "XX 醫院")
+    hospital_name    = ss.get("cfg_hospital",        "測試醫院")
 
     # ── 頂部標題（單行緊湊版） ────────────────────────────────────────────────────
     h_left, h_mid, h_right = st.columns([5, 2, 1])
@@ -593,8 +602,9 @@ def main():
                     COLS = [0.28, 1.55, 1.45, 1.15, 1.05, 0.72]
                     hcols = st.columns(COLS)
                     for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
+                        extra = "text-align:center;white-space:nowrap;" if lbl == "通報單" else ""
                         col.markdown(
-                            f"<b style='font-size:0.8rem;color:#555'>{lbl}</b>",
+                            f"<b style='font-size:0.8rem;color:#555;{extra}'>{lbl}</b>",
                             unsafe_allow_html=True,
                         )
                     st.markdown(
@@ -607,7 +617,9 @@ def main():
 
                     for i, row in view_df.iterrows():
                         is_sel = (i == sel_idx)
-                        hl     = "background:#EDF4FF;border-radius:4px;" if is_sel else ""
+                        # 選取指示：左側藍線 + 顯式文字色，避免 dark mode 亮底色蓋掉文字
+                        hl = ("border-left:3px solid #4A9EFF;padding-left:4px;"
+                              "color:#4A9EFF !important;" if is_sel else "")
                         rcols  = st.columns(COLS)
                         d_zh   = (f"{DISEASE_EMOJI.get(row['disease'],'')} "
                                   f"{DISEASE_ZH.get(row['disease'], row['disease'])}")
