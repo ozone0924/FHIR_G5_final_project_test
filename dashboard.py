@@ -563,8 +563,10 @@ def _bar_legend() -> dict:
     """共用的大字型圖例設定（方便點選）"""
     return dict(
         orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-        font=dict(size=14, color="#111"),
-        bgcolor="rgba(255,255,255,0.0)",
+        font=dict(size=14, color="#111111"),
+        bgcolor="rgba(255,255,255,0.88)",
+        bordercolor="rgba(0,0,0,0.15)",
+        borderwidth=1,
         itemclick="toggle", itemdoubleclick="toggleothers",
     )
 
