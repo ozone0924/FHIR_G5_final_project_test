@@ -222,30 +222,34 @@ def generate_eicr_pdf(eicr: dict, hospital_name: str = "XX 醫院") -> bytes:
               ("通報日期", datetime.now().strftime("%Y/%m/%d"))])
 
     # ── 簽章欄 ────────────────────────────────────────────────────────────────
+    # 用 cell()（不換行），避免簽名底線文字超過 sign_w 發生多行偏位
+    SIGN_H = 18
     pdf.ln(5)
     sign_w = W / 3
     y_sign = pdf.get_y()
     sign_texts = [
-        "通報醫師簽章：___________________________",
-        "院所主管簽章：___________________________",
+        "通報醫師簽章：______________",
+        "院所主管簽章：______________",
         f"通報日期：{datetime.now().strftime('%Y/%m/%d')}",
     ]
     for i, txt in enumerate(sign_texts):
         pdf._f(10)
         pdf.set_text_color(0, 0, 0)
         pdf.set_xy(pdf.l_margin + i * sign_w, y_sign)
-        pdf.multi_cell(sign_w, 15, txt, border=1, align="L",
-                       new_x="RIGHT", new_y="TOP")
-    pdf.set_xy(pdf.l_margin, y_sign + 15)
+        pdf.cell(sign_w, SIGN_H, txt, border=1, align="L")
+    pdf.set_xy(pdf.l_margin, y_sign + SIGN_H)
 
     # ── 頁尾 ──────────────────────────────────────────────────────────────────
-    pdf.ln(4)
+    pdf.ln(5)
     pdf.hr(0.3)
     pdf.ln(2)
     pdf._f(7)
     pdf.set_text_color(130, 130, 130)
+    bid    = eicr.get("bundle_id", "—")
+    status = eicr.get("comp_status", "").upper()
     for line in [
-        f"eICR Bundle ID：{eicr.get('bundle_id','—')}　文件狀態：{eicr.get('comp_status','').upper()}",
+        f"Bundle ID：{bid}",
+        f"文件狀態：{status}",
         "本通報單由 MedMorph 自動通報引擎依據 HL7 FHIR R4 標準產生，格式參照衛生福利部傳染病個案通報單。",
         "NTU 智慧醫療期末專題 · 第五組 · MedMorph Reference Architecture · 僅供學術展示用途",
     ]:
