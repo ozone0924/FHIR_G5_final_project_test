@@ -744,25 +744,39 @@ def make_age_chart(df: pd.DataFrame) -> go.Figure:
 
 
 def make_symptom_chart(df: pd.DataFrame, top_n: int = 12) -> go.Figure:
-    """最常見症狀排行"""
+    """主訴症狀排行，依疾病分色堆疊"""
     if df.empty or "symptoms_list" not in df.columns:
         return go.Figure()
+    # 先找全局 top_n 症狀作為 y 軸順序
     all_syms = [s for row in df["symptoms_list"] for s in row]
     if not all_syms:
         return go.Figure()
-    counts = Counter(all_syms).most_common(top_n)
-    labels = [c[0] for c in reversed(counts)]
-    values = [c[1] for c in reversed(counts)]
-    fig = go.Figure(go.Bar(
-        x=values, y=labels, orientation="h",
-        marker_color="#4A9EFF",
-        hovertemplate="%{y}：%{x} 次<extra></extra>",
-    ))
+    top_syms = [s for s, _ in Counter(all_syms).most_common(top_n)]
+    top_syms_ordered = list(reversed(top_syms))  # 由少到多，橫條圖由下到上
+
+    fig = go.Figure()
+    for disease in list(DISEASE_ZH):
+        sub = df[df["disease"] == disease]
+        if sub.empty:
+            continue
+        disease_syms = [s for row in sub["symptoms_list"] for s in row]
+        cnt = Counter(disease_syms)
+        fig.add_trace(go.Bar(
+            y=top_syms_ordered,
+            x=[cnt.get(s, 0) for s in top_syms_ordered],
+            name=f"{DISEASE_EMOJI[disease]} {DISEASE_ZH[disease]}",
+            orientation="h",
+            marker_color=DISEASE_COLORS[disease],
+            hovertemplate="%{y}：%{x} 次<extra></extra>",
+        ))
+
     fig.update_layout(
-        title=dict(text=f"主訴症狀 Top {top_n}", font_size=14),
+        barmode="stack",
+        title=dict(text=f"主訴症狀 Top {top_n}（依疾病分色）", font_size=14),
         xaxis_title="出現次數",
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        height=300, margin=dict(l=90, r=20, t=50, b=40),
+        height=340, margin=dict(l=90, r=20, t=50, b=40),
+        legend=_bar_legend(),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
     return fig
