@@ -412,7 +412,7 @@ def create_submission(case_id: str, bundle_id: str, submitted_at: str,
         task_status   = "in-progress"
         response      = "pending"
         ack_at        = None
-        note          = f"eICR 已送出，等待 NSSP 回應（預計 {delay_sec} 秒內）"
+        note          = "eICR 已送出，等待 NSSP 回應中"
         retry_count   = 0
     else:
         # seed / 歷史模式：立即模擬 NSSP 回應（5 分鐘 ~ 2 小時後）
@@ -515,7 +515,7 @@ def process_pending_submissions(db_path: str = DB_PATH) -> int:
                             """UPDATE submissions SET
                                retry_count=?, next_check_at=?, note=? WHERE id=?""",
                             (new_retry, next_check,
-                             f"第 {new_retry} 次重試，{retry_delay} 秒後再嘗試",
+                             f"NSSP 無回應，第 {new_retry} 次重試中",
                              sub_id),
                         )
                         log.warning("⚠️  [NSSP] 通報 %-12s 失敗，%ds 後第 %d 次重試",
