@@ -726,22 +726,23 @@ def sequence_html() -> str:
         ph_color = {"A": "#1565C0", "B": "#2E7D32", "C": "#E65100"}.get(ph_label[6], "#888")
         rows.append(
             f"<tr><td colspan='4' style='background:{ph_bg};padding:5px 12px;"
-            f"border-left:4px solid {ph_color};font-size:0.79rem;font-weight:700;color:#444'>"
+            f"border-left:4px solid {ph_color};font-size:0.79rem;font-weight:700;color:#1a1a1a'>"
             f"{ph_label}</td></tr>"
         )
         for src, dst, arrow, msg in msgs:
             rows.append(
-                f"<tr style='border-bottom:1px solid #eee'>"
+                f"<tr style='border-bottom:1px solid #eee;background:white'>"
                 f"<td style='padding:6px 10px'>{badge(src)}</td>"
-                f"<td style='padding:6px 4px;text-align:center;font-size:1.1rem;color:#888'>{arrow}</td>"
+                f"<td style='padding:6px 4px;text-align:center;font-size:1.1rem;color:#555'>{arrow}</td>"
                 f"<td style='padding:6px 10px'>{badge(dst) if dst else ''}</td>"
-                f"<td style='padding:6px 14px;font-size:0.82rem;color:#333'>{msg}</td>"
+                f"<td style='padding:6px 14px;font-size:0.82rem;color:#111;font-weight:500'>{msg}</td>"
                 f"</tr>"
             )
 
     return (
-        "<table style='width:100%;border-collapse:collapse;font-family:sans-serif;"
-        "border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-top:4px'>"
+        "<div style='background:white;border-radius:8px;overflow:hidden;"
+        "border:1px solid #ddd;margin-top:4px'>"
+        "<table style='width:100%;border-collapse:collapse;font-family:sans-serif'>"
         "<thead><tr style='background:#2C3E50;color:white'>"
         "<th style='padding:8px 10px;text-align:left;font-size:0.8rem;white-space:nowrap'>發送方</th>"
         "<th style='padding:8px 4px;width:28px'></th>"
@@ -749,7 +750,7 @@ def sequence_html() -> str:
         "<th style='padding:8px 14px;text-align:left;font-size:0.8rem'>訊息 / 動作</th>"
         "</tr></thead>"
         "<tbody>" + "".join(rows) + "</tbody>"
-        "</table>"
+        "</table></div>"
     )
 
 
