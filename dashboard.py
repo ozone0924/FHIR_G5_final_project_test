@@ -799,6 +799,7 @@ def load_submissions(db_path: str) -> pd.DataFrame:
                 SELECT s.id, s.case_id, s.bundle_id, s.task_id, s.task_status,
                        s.doc_ref_id, s.comm_id, s.submitted_at, s.ack_at,
                        s.response, s.note,
+                       COALESCE(s.retry_count, 0) AS retry_count,
                        c.patient_name, c.disease, c.county, c.status AS case_status
                 FROM submissions s
                 LEFT JOIN cases c ON s.case_id = c.id
@@ -1454,9 +1455,15 @@ def main():
                 )
                 display["狀態"] = display["response"].apply(status_badge)
                 display["Task 狀態"] = display["task_status"].map(
-                    {"completed": "✅ completed", "rejected": "❌ rejected",
-                     "in-progress": "🔄 in-progress", "requested": "⏳ requested"}
+                    {"completed":   "✅ completed",
+                     "rejected":    "❌ rejected",
+                     "failed":      "🚫 failed",
+                     "in-progress": "🔄 in-progress",
+                     "requested":   "⏳ requested"}
                 ).fillna(display["task_status"])
+                display["重試次數"] = display["retry_count"].fillna(0).astype(int).apply(
+                    lambda n: f"{n} 次" if n > 0 else "—"
+                )
                 display["疾病"] = display["disease"].map(
                     lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
                 )
@@ -1464,7 +1471,7 @@ def main():
                 st.dataframe(
                     display[[
                         "patient_name", "疾病", "county",
-                        "狀態", "Task 狀態",
+                        "狀態", "Task 狀態", "重試次數",
                         "通報時間 (TPE)", "回應時間 (TPE)", "note",
                     ]].rename(columns={
                         "patient_name": "病患", "county": "縣市", "note": "備註"

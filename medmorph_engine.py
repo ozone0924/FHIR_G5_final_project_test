@@ -309,21 +309,31 @@ def init_db(db_path: str = DB_PATH) -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS submissions (
-                id           TEXT PRIMARY KEY,
-                case_id      TEXT NOT NULL,
-                bundle_id    TEXT NOT NULL,
-                task_id      TEXT NOT NULL,
-                task_status  TEXT NOT NULL,
-                doc_ref_id   TEXT,
-                comm_id      TEXT,
-                submitted_at TEXT NOT NULL,
-                ack_at       TEXT,
-                response     TEXT,
-                note         TEXT,
-                created_at   TEXT NOT NULL
+                id            TEXT PRIMARY KEY,
+                case_id       TEXT NOT NULL,
+                bundle_id     TEXT NOT NULL,
+                task_id       TEXT NOT NULL,
+                task_status   TEXT NOT NULL,
+                doc_ref_id    TEXT,
+                comm_id       TEXT,
+                submitted_at  TEXT NOT NULL,
+                ack_at        TEXT,
+                response      TEXT,
+                note          TEXT,
+                created_at    TEXT NOT NULL,
+                next_check_at TEXT,
+                retry_count   INTEGER DEFAULT 0
             )
             """
         )
+        # 遷移：為舊版 submissions 補充新欄位
+        existing_sub = {row[1] for row in conn.execute("PRAGMA table_info(submissions)")}
+        for col_def in [
+            ("next_check_at", "TEXT"),
+            ("retry_count",   "INTEGER DEFAULT 0"),
+        ]:
+            if col_def[0] not in existing_sub:
+                conn.execute(f"ALTER TABLE submissions ADD COLUMN {col_def[0]} {col_def[1]}")
         conn.commit()
     log.info("✅ SQLite 資料庫初始化完成：%s", db_path)
 
@@ -377,34 +387,47 @@ def insert_case(case: dict, db_path: str = DB_PATH) -> bool:
 # ── Phase B：通報送出記錄 ─────────────────────────────────────────────────────
 
 def create_submission(case_id: str, bundle_id: str, submitted_at: str,
-                      db_path: str = DB_PATH) -> dict:
+                      db_path: str = DB_PATH, live: bool = False) -> dict:
     """
     Phase B：模擬 eICR 送出至 NSSP，建立 Task / Communication / DocumentReference 記錄。
 
     Parameters
     ----------
-    submitted_at : str  ISO 8601 送出時間（可為過去，適合 seed 歷史資料）
+    submitted_at : str   ISO 8601 送出時間（可為過去，適合 seed 歷史資料）
+    live         : bool  True = 即時模式，寫入 pending 狀態，等候背景 worker 更新；
+                         False = seed 模式，立即決定結果（歷史資料用）
     """
     sub_id     = f"sub-{uuid.uuid4().hex[:8]}"
     task_id    = f"task-{uuid.uuid4().hex[:8]}"
     doc_ref_id = f"docref-{uuid.uuid4().hex[:8]}"
     comm_id    = f"comm-{uuid.uuid4().hex[:8]}"
 
-    # 模擬 NSSP 回應時間（送出後 5 分鐘到 2 小時）
-    try:
-        sub_obj = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
-    except Exception:
-        sub_obj = datetime.now(timezone.utc)
-    ack_delay  = timedelta(minutes=random.uniform(5, 120))
-    ack_obj    = min(sub_obj + ack_delay, datetime.now(timezone.utc))
-    ack_at     = ack_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # 模擬成功率（90% accepted）
-    success     = random.random() < 0.90
-    response    = "accepted" if success else "error"
-    task_status = "completed" if success else "rejected"
-    note        = ("eICR 已成功送達疾管署通報系統（NSSP），Task 已完成"
-                   if success else "送出失敗：NSSP 暫時無回應，建議重新送出")
+    if live:
+        # 即時模式：寫入 pending，由 process_pending_submissions() 在延遲後決定結果
+        delay_sec   = random.randint(10, 100)
+        next_check  = (datetime.now(timezone.utc) + timedelta(seconds=delay_sec))
+        next_check_at = next_check.strftime("%Y-%m-%dT%H:%M:%SZ")
+        task_status = "in-progress"
+        response    = "pending"
+        ack_at      = None
+        note        = f"eICR 已送出，等待 NSSP 回應（預計 {delay_sec} 秒內）"
+        retry_count = 0
+    else:
+        # seed / 歷史模式：立即模擬 NSSP 回應（5 分鐘 ~ 2 小時後）
+        try:
+            sub_obj = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+        except Exception:
+            sub_obj = datetime.now(timezone.utc)
+        ack_obj    = min(sub_obj + timedelta(minutes=random.uniform(5, 120)),
+                         datetime.now(timezone.utc))
+        ack_at     = ack_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
+        success     = random.random() < 0.90
+        response    = "accepted" if success else "error"
+        task_status = "completed" if success else "rejected"
+        note        = ("eICR 已成功送達疾管署通報系統（NSSP），Task 已完成"
+                       if success else "送出失敗：NSSP 暫時無回應，建議重新送出")
+        next_check_at = None
+        retry_count   = 0
 
     try:
         with sqlite3.connect(db_path) as conn:
@@ -413,26 +436,95 @@ def create_submission(case_id: str, bundle_id: str, submitted_at: str,
                 INSERT OR IGNORE INTO submissions
                     (id, case_id, bundle_id, task_id, task_status,
                      doc_ref_id, comm_id, submitted_at, ack_at,
-                     response, note, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     response, note, created_at, next_check_at, retry_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sub_id, case_id, bundle_id, task_id, task_status,
                     doc_ref_id, comm_id, submitted_at, ack_at,
                     response, note,
                     datetime.now(timezone.utc).isoformat(),
+                    next_check_at, retry_count,
                 ),
             )
             conn.commit()
     except sqlite3.Error as e:
         log.error("❌ Submission 寫入失敗：%s", e)
 
-    log.info("📡 [Phase B] 送出 %s → %s (%s)", sub_id[:8], response, task_status)
+    log.info("📡 [Phase B] 送出 %s → %s (%s)%s",
+             sub_id[:8], response, task_status,
+             f"（{delay_sec}s 後回應）" if live else "")
     return {
         "id": sub_id, "task_id": task_id, "task_status": task_status,
         "doc_ref_id": doc_ref_id, "comm_id": comm_id,
         "response": response, "submitted_at": submitted_at, "ack_at": ack_at,
     }
+
+
+def process_pending_submissions(db_path: str = DB_PATH) -> int:
+    """
+    檢查 pending 中且已到達 next_check_at 的通報，模擬 NSSP 回應並更新狀態。
+    失敗時安排重試，最多 3 次；超過後標記為 error/failed。
+    回傳本次處理筆數。
+    """
+    now     = datetime.now(timezone.utc)
+    now_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    processed = 0
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                """SELECT id, retry_count FROM submissions
+                   WHERE response = 'pending' AND next_check_at <= ?
+                   ORDER BY next_check_at""",
+                (now_str,),
+            ).fetchall()
+
+            for sub_id, retry_count in rows:
+                success = random.random() < 0.90
+                if success:
+                    conn.execute(
+                        """UPDATE submissions SET
+                           response='accepted', task_status='completed',
+                           ack_at=?, note=? WHERE id=?""",
+                        (now_str,
+                         "eICR 已成功送達疾管署通報系統（NSSP），Task 已完成",
+                         sub_id),
+                    )
+                    log.info("✅ [NSSP] 通報 %-12s → accepted", sub_id)
+                else:
+                    new_retry = retry_count + 1
+                    if new_retry >= 3:
+                        conn.execute(
+                            """UPDATE submissions SET
+                               response='error', task_status='failed',
+                               ack_at=?, note=? WHERE id=?""",
+                            (now_str,
+                             f"送出失敗：已重試 {retry_count} 次，NSSP 持續無回應，放棄",
+                             sub_id),
+                        )
+                        log.warning("❌ [NSSP] 通報 %-12s 達重試上限（%d 次），標記失敗",
+                                    sub_id, retry_count)
+                    else:
+                        retry_delay = random.randint(30, 180)
+                        next_check  = (now + timedelta(seconds=retry_delay)).strftime(
+                            "%Y-%m-%dT%H:%M:%SZ")
+                        conn.execute(
+                            """UPDATE submissions SET
+                               retry_count=?, next_check_at=?, note=? WHERE id=?""",
+                            (new_retry, next_check,
+                             f"第 {new_retry} 次重試，{retry_delay} 秒後再嘗試",
+                             sub_id),
+                        )
+                        log.warning("⚠️  [NSSP] 通報 %-12s 失敗，%ds 後第 %d 次重試",
+                                    sub_id, retry_delay, new_retry)
+                processed += 1
+
+            conn.commit()
+    except sqlite3.Error as e:
+        log.error("❌ process_pending_submissions 失敗：%s", e)
+
+    return processed
 
 
 # ── 模擬 FHIR Client（本地模式） ───────────────────────────────────────────────
@@ -651,6 +743,7 @@ def process_case(raw: dict, db_path: str = DB_PATH, output_dir: str = OUTPUT_DIR
             bundle_id=bundle["id"],
             submitted_at=case_record["report_date"],
             db_path=db_path,
+            live=True,   # 即時模式：先 pending，由背景 worker 決定結果
         )
     else:
         log.debug("↩️  重複案例，略過：%s", patient["id"])
@@ -689,6 +782,8 @@ def run_engine(
         while True:
             cycle += 1
             log.debug("⏱  第 %d 輪輪詢…", cycle)
+
+            # 輪詢新案例
             cases = poller.poll_suspected_conditions()
             if cases:
                 log.info("🔔 偵測到 %d 筆新案例，開始處理…", len(cases))
@@ -696,6 +791,12 @@ def run_engine(
                     process_case(raw, db_path=db_path, output_dir=output_dir)
             else:
                 log.debug("   無新案例")
+
+            # 處理 pending 中的通報（NSSP 模擬回應 + 重試機制）
+            n_resolved = process_pending_submissions(db_path=db_path)
+            if n_resolved:
+                log.info("🔁 [NSSP worker] 本輪處理 %d 筆 pending 通報", n_resolved)
+
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         log.info("🛑 引擎已停止（Ctrl+C）")
