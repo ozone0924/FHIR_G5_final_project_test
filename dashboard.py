@@ -999,6 +999,14 @@ def main():
         padding-left: 0 !important;
         padding-right: 0 !important;
     }
+    [data-testid="stButton"] > button p {
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
     </style>""", unsafe_allow_html=True)
 
     db_path_val   = ss.get("cfg_db_path",   DB_PATH)
@@ -1378,7 +1386,7 @@ def main():
     with tab_track:
         with st.container(height=TAB_H, border=False):
             _days_slider("track")
-            st.markdown("#### 📋 Phase B 通報送出記錄")
+            st.markdown("#### 📋 通報送出記錄")
             sdf = load_submissions(db_path_val)
             if not sdf.empty and "submitted_at" in sdf.columns:
                 _cutoff_track = datetime.now(TZ_TPE) - timedelta(days=days_val)
