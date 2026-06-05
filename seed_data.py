@@ -145,9 +145,9 @@ OUTBREAKS: list[dict] = [
         "disease":     "COVID-19",
         "label":       "COVID-19 第二波（新北→全台快速擴散）",
         "epicenter":   "新北市",
-        "start_day":   -88,  # 約3個月前
-        "peak_offset": 28,
-        "duration":    78,
+        "start_day":   -60,  # 約2個月前，波形延伸至今天附近
+        "peak_offset": 25,
+        "duration":    80,   # start+duration=+20（超過今天，確保尾端有近期資料）
         "total_cases": 90,
         "spread_type": "respiratory",
         "county_delays": {
@@ -170,9 +170,9 @@ OUTBREAKS: list[dict] = [
         "disease":     "Dengue",
         "label":       "台南登革熱次波（→高雄/嘉義）",
         "epicenter":   "台南市",
-        "start_day":   -68,  # 約2個月前，仍在夏末
-        "peak_offset": 25,
-        "duration":    65,
+        "start_day":   -42,  # 約6週前，仍在進行中
+        "peak_offset": 18,
+        "duration":    55,   # start+duration=+13（仍在高原期，近日大量案例）
         "total_cases": 47,
         "spread_type": "vector",
         "county_delays": {
