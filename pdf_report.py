@@ -13,8 +13,9 @@ from fpdf import FPDF
 
 # ── 字型準備 ──────────────────────────────────────────────────────────────────
 _TMP_FONT_PATH: str | None = None
-
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _TTC_CANDIDATES = [
+    (os.path.join(_BASE_DIR, "fonts", "STHeiti Medium.ttc"), 0), 
     ("/System/Library/Fonts/STHeiti Medium.ttc", 0),   # macOS — 繁體確認可用
     ("/System/Library/Fonts/STHeiti Light.ttc",  0),   # macOS 備援
     ("/System/Library/Fonts/PingFang.ttc",       0),   # macOS PingFang
