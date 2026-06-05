@@ -1,0 +1,314 @@
+{
+  "resourceType": "Bundle",
+  "id": "2210d63e-d49c-4a40-9611-9c56591afad4",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-document-bundle"
+    ],
+    "lastUpdated": "2026-01-08T00:51:32Z"
+  },
+  "type": "document",
+  "timestamp": "2026-01-08T00:51:32Z",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:ece92c6d-afc8-46f6-aa26-a3742245d0f7",
+      "resource": {
+        "resourceType": "Composition",
+        "id": "ece92c6d-afc8-46f6-aa26-a3742245d0f7",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-composition"
+          ]
+        },
+        "status": "preliminary",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "55751-2",
+              "display": "Public health case report - PHRI"
+            }
+          ]
+        },
+        "subject": {
+          "reference": "Patient/patient-a1e743f384"
+        },
+        "encounter": {
+          "reference": "Encounter/62c6f673-8f5a-4a23-80f6-70580e2bedcd"
+        },
+        "date": "2026-01-08T00:51:32Z",
+        "author": [
+          {
+            "reference": "Organization/org-hosp-f42fd3"
+          }
+        ],
+        "custodian": {
+          "reference": "Organization/org-tw-cdc"
+        },
+        "title": "eICR - Influenza 疑似病例通報",
+        "section": [
+          {
+            "title": "Chief Complaint",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10154-3",
+                  "display": "Chief complaint Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "generated",
+              "div": "<div xmlns='http://www.w3.org/1999/xhtml'>主訴：發燒、畏寒、肌肉痠痛</div>"
+            }
+          },
+          {
+            "title": "Reportable Conditions",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "55752-0",
+                  "display": "Reportable condition"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Condition/eb38f3cd-8c96-4a4f-a24c-a591064fb109"
+              }
+            ]
+          },
+          {
+            "title": "Results",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "30954-2",
+                  "display": "Relevant diagnostic tests/laboratory data Narrative"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Observation/5e552d26-04d8-498e-a126-541488d659c3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Patient/patient-a1e743f384",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-a1e743f384",
+        "name": [
+          {
+            "use": "official",
+            "text": "朱雅婷"
+          }
+        ],
+        "birthDate": "1995-03-19",
+        "gender": "female",
+        "telecom": [],
+        "address": [
+          {
+            "use": "home",
+            "line": [
+              "桃園市楊梅區忠孝路257號"
+            ],
+            "district": "楊梅區",
+            "city": "桃園市",
+            "country": "TW"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Condition/eb38f3cd-8c96-4a4f-a24c-a591064fb109",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "eb38f3cd-8c96-4a4f-a24c-a591064fb109",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-condition"
+          ]
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "confirmed",
+              "display": "Confirmed"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+              "code": "confirmed"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                "code": "encounter-diagnosis",
+                "display": "Encounter Diagnosis"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "57386000",
+              "display": "Influenza (disorder)"
+            }
+          ],
+          "text": "Influenza"
+        },
+        "subject": {
+          "reference": "Patient/patient-a1e743f384"
+        },
+        "onsetDateTime": "2026-01-07T10:03:06Z",
+        "recordedDate": "2026-01-08T00:51:32Z"
+      }
+    },
+    {
+      "fullUrl": "Observation/5e552d26-04d8-498e-a126-541488d659c3",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "5e552d26-04d8-498e-a126-541488d659c3",
+        "status": "preliminary",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory",
+                "display": "Laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "92142-9",
+              "display": "Influenza virus A RNA panel"
+            }
+          ],
+          "text": "Influenza 檢驗"
+        },
+        "subject": {
+          "reference": "Patient/patient-a1e743f384"
+        },
+        "effectiveDateTime": "2026-01-07T10:03:06Z",
+        "valueCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "52101004",
+              "display": "Present"
+            }
+          ],
+          "text": "發燒、畏寒、肌肉痠痛"
+        }
+      }
+    },
+    {
+      "fullUrl": "Encounter/62c6f673-8f5a-4a23-80f6-70580e2bedcd",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "62c6f673-8f5a-4a23-80f6-70580e2bedcd",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "11429006",
+                "display": "Consultation"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/patient-a1e743f384"
+        },
+        "serviceProvider": {
+          "reference": "Organization/org-hosp-f42fd3"
+        },
+        "period": {
+          "start": "2026-01-07T10:03:06Z",
+          "end": "2026-01-07T10:03:06Z"
+        }
+      }
+    },
+    {
+      "fullUrl": "Organization/org-hosp-f42fd3",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-hosp-f42fd3",
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
+                "code": "prov",
+                "display": "Healthcare Provider"
+              }
+            ]
+          }
+        ],
+        "name": "敏盛醫院",
+        "address": [
+          {
+            "text": "桃園市桃園區經國路168號",
+            "country": "TW"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Organization/org-tw-cdc",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-tw-cdc",
+        "name": "衛生福利部疾病管制署",
+        "alias": [
+          "Taiwan CDC"
+        ],
+        "telecom": [
+          {
+            "system": "url",
+            "value": "https://www.cdc.gov.tw"
+          }
+        ],
+        "address": [
+          {
+            "line": [
+              "林森北路161號"
+            ],
+            "city": "台北市",
+            "country": "TW"
+          }
+        ]
+      }
+    }
+  ]
+}
