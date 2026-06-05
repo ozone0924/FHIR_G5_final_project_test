@@ -860,6 +860,20 @@ def main():
     .metric-label { font-size:0.85rem; opacity:0.85; margin-top:3px; }
     .metric-sub   { font-size:0.72rem; opacity:0.6;  margin-top:3px; }
 
+    /* ═══ 地圖模式 Segmented Control ═══ */
+    div[data-testid="stSegmentedControl"] {
+        gap: 8px !important;
+        padding: 2px 0 !important;
+    }
+    div[data-testid="stSegmentedControl"] button {
+        min-height: 46px !important;
+        font-size: 1.0rem !important;
+        font-weight: 600 !important;
+        padding: 0 20px !important;
+        border-radius: 10px !important;
+        transition: all 0.18s ease !important;
+    }
+
     /* ═══ Tab 按鈕 ═══ */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px; background: transparent;
@@ -982,22 +996,24 @@ def main():
     # ── Tab 1：地理分布 ─────────────────────────────────────────────────────────
     with tab_map:
         with st.container(height=TAB_H, border=False):
-            # ── 第一列：地圖模式 + 疾病 toggle（左右分置） ──────────────────
-            r1, r2 = st.columns([3, 2])
-            with r1:
-                map_mode = st.radio(
-                    "地圖類型",
-                    ["🗺️ 縣市累積分布", "🏥 通報院所熱點", "🏠 病患居住地（時間擴散）"],
-                    horizontal=True, label_visibility="collapsed",
-                )
-            with r2:
-                tc1, tc2, tc3 = st.columns(3)
-                s_covid  = tc1.checkbox(f"{DISEASE_EMOJI['COVID-19']} COVID-19",
-                                        value=True, key="map_d_covid")
-                s_dengue = tc2.checkbox(f"{DISEASE_EMOJI['Dengue']} 登革熱",
-                                        value=True, key="map_d_dengue")
-                s_flu    = tc3.checkbox(f"{DISEASE_EMOJI['Influenza']} 流感",
-                                        value=True, key="map_d_flu")
+            # ── 第一列：地圖模式（全寬 segmented control） ──────────────────
+            _MAP_MODES = ["🗺️ 縣市累積分布", "🏥 通報院所熱點", "🏠 病患居住地（時間擴散）"]
+            map_mode = st.segmented_control(
+                "地圖類型",
+                options=_MAP_MODES,
+                default=_MAP_MODES[0],
+                label_visibility="collapsed",
+                key="map_mode_seg",
+            ) or _MAP_MODES[0]
+
+            # ── 第二列：疾病 toggle ───────────────────────────────────────
+            _, tc1, tc2, tc3 = st.columns([4, 1, 1, 1])
+            s_covid  = tc1.checkbox(f"{DISEASE_EMOJI['COVID-19']} COVID-19",
+                                    value=True, key="map_d_covid")
+            s_dengue = tc2.checkbox(f"{DISEASE_EMOJI['Dengue']} 登革熱",
+                                    value=True, key="map_d_dengue")
+            s_flu    = tc3.checkbox(f"{DISEASE_EMOJI['Influenza']} 流感",
+                                    value=True, key="map_d_flu")
 
             sel_d = [d for d, s in [
                 ("COVID-19", s_covid), ("Dengue", s_dengue), ("Influenza", s_flu)
