@@ -394,32 +394,42 @@ def main():
 
     st.markdown("""
     <style>
-    /* ── KPI 卡片 ── */
+    /* ═══ 全頁固定於 viewport，禁止整頁捲動 ═══ */
+    html { overflow-y: hidden !important; }
+    .main .block-container {
+        padding-top: 0.6rem !important;
+        padding-bottom: 0 !important;
+        max-height: calc(100vh - 58px) !important;
+        overflow: hidden !important;
+    }
+
+    /* ═══ KPI 卡片（緊湊版） ═══ */
     .metric-card {
-        border-radius:12px;padding:18px 20px;color:white;
-        text-align:center;box-shadow:0 3px 10px rgba(0,0,0,0.12);
+        border-radius:10px; padding:10px 14px; color:white;
+        text-align:center; box-shadow:0 3px 8px rgba(0,0,0,0.1);
         background:linear-gradient(135deg,#1e3a5f,#2d6a9f);
     }
-    .metric-value{font-size:2.6rem;font-weight:700;line-height:1}
-    .metric-label{font-size:0.9rem;opacity:0.85;margin-top:4px}
-    .metric-sub  {font-size:0.75rem;opacity:0.6;margin-top:4px}
+    .metric-value { font-size:2.1rem; font-weight:700; line-height:1; }
+    .metric-label { font-size:0.85rem; opacity:0.85; margin-top:3px; }
+    .metric-sub   { font-size:0.72rem; opacity:0.6;  margin-top:3px; }
 
-    /* ── Tab 按鈕 ── */
+    /* ═══ Tab 按鈕 ═══ */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background: transparent;
         border-bottom: 2px solid #E0E6F0;
         padding-bottom: 0;
+        margin-bottom: 0;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 52px;
-        min-width: 155px;
-        padding: 0 22px;
+        height: 48px;
+        min-width: 150px;
+        padding: 0 20px;
         background: #F0F4FA;
         border-radius: 10px 10px 0 0;
         border: 1.5px solid #D0DBF0;
         border-bottom: none;
-        font-size: 1.02rem !important;
+        font-size: 1.0rem !important;
         font-weight: 600 !important;
         color: #4A6FA5 !important;
         transition: background 0.2s, color 0.2s;
@@ -435,9 +445,15 @@ def main():
         border-bottom: 2px solid white !important;
         box-shadow: 0 -2px 8px rgba(0,63,135,0.08);
     }
-    /* Tab 內容區 */
+    /* Tab 內容區不產生自身捲動，由內部 container 負責 */
     .stTabs [data-baseweb="tab-panel"] {
-        padding-top: 18px;
+        padding-top: 10px !important;
+        overflow: hidden !important;
+    }
+
+    /* ═══ 內部滾動容器：移除預設灰框，顯示自訂捲軸 ═══ */
+    [data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-radius: 8px;
     }
     </style>""", unsafe_allow_html=True)
 
@@ -448,15 +464,24 @@ def main():
     days_val         = ss.get("cfg_days_range",       14)
     hospital_name    = ss.get("cfg_hospital",        "XX 醫院")
 
-    # ── 頂部標題 ────────────────────────────────────────────────────────────────
-    h_left, h_right = st.columns([6, 1])
+    # ── 頂部標題（單行緊湊版） ────────────────────────────────────────────────────
+    h_left, h_mid, h_right = st.columns([5, 2, 1])
     with h_left:
-        st.markdown("## 🏥 傳染病即時公衛儀表板")
-        st.caption("MedMorph · FHIR R4 · HL7 eICR · NTU 智慧醫療期末專題 第五組")
+        st.markdown(
+            "<h3 style='margin:0;padding:0;line-height:1.2'>🏥 傳染病即時公衛儀表板</h3>"
+            "<p style='margin:0;font-size:0.78rem;color:#888'>"
+            "MedMorph · FHIR R4 · HL7 eICR · NTU 智慧醫療期末專題 第五組</p>",
+            unsafe_allow_html=True,
+        )
+    with h_mid:
+        st.markdown(
+            f"<div style='text-align:right;padding-top:4px;"
+            f"font-size:0.82rem;color:#999'>⏱ 每 {REFRESH_INTERVAL_MS//1000}s 刷新　"
+            f"{datetime.now().strftime('%H:%M:%S')}</div>",
+            unsafe_allow_html=True,
+        )
     with h_right:
-        st.markdown(f"<br>⏱ 每 {REFRESH_INTERVAL_MS//1000}s 刷新", unsafe_allow_html=True)
-        st.caption(datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
-        if st.button("🔄 立即刷新", use_container_width=True):
+        if st.button("🔄 刷新", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -498,205 +523,234 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # 去掉 <br> 間距，改為一小段 margin
+    st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
     if df_all.empty:
         st.warning("⚠️ 尚無資料。請先執行：\n```bash\nuv run python seed_data.py\n```")
         return
 
-    # ── Tabs ─────────────────────────────────────────────────────────────────
+    # ── Tabs（所有內容都在固定高度 container 內捲動） ─────────────────────────
+    # 根據視窗高度估算可用高度：100vh - 58(bar) - 55(title) - 90(KPI) - 55(tabs) ≈ 560px
+    TAB_H = 560   # tab 內容區高度（像素）
+    LIST_H = TAB_H - 2   # 清單/面板高度（含標頭略小）
+
     tab_map, tab_trend, tab_cases, tab_settings = st.tabs([
         "🗺️ 地理分布", "📈 趨勢分析", "📋 案例明細 & 通報單", "⚙️ 設定",
     ])
 
     # ── Tab 1：地理分布 ─────────────────────────────────────────────────────────
     with tab_map:
-        st.plotly_chart(make_map_figure(df, disease_val),
-                        use_container_width=True, config={"scrollZoom": True})
-        st.plotly_chart(make_county_bar(df), use_container_width=True)
+        with st.container(height=TAB_H, border=False):
+            mc, bc = st.columns([3, 2])
+            with mc:
+                st.plotly_chart(
+                    make_map_figure(df, disease_val),
+                    use_container_width=True, config={"scrollZoom": True},
+                )
+            with bc:
+                st.plotly_chart(make_county_bar(df), use_container_width=True)
 
     # ── Tab 2：趨勢分析 ─────────────────────────────────────────────────────────
     with tab_trend:
-        st.plotly_chart(make_trend_figure(df_all, days_val, disease_val),
-                        use_container_width=True)
-        if "date" in df_all.columns:
-            cutoff = (datetime.now() - timedelta(days=days_val)).date()
-            summary = (
-                df_all[df_all["date"] >= cutoff]
-                .groupby("disease")
-                .agg(案例數=("id", "count"),
-                     疑似=("status", lambda x: (x == "suspected").sum()),
-                     確診=("status", lambda x: (x == "confirmed").sum()))
-                .reset_index()
+        with st.container(height=TAB_H, border=False):
+            st.plotly_chart(
+                make_trend_figure(df_all, days_val, disease_val),
+                use_container_width=True,
             )
-            summary["disease"] = summary["disease"].map(
-                lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
-            )
-            summary.columns = ["疾病", f"近{days_val}天案例", "　疑似", "　確診"]
-            st.dataframe(summary, use_container_width=True, hide_index=True)
+            if "date" in df_all.columns:
+                cutoff = (datetime.now() - timedelta(days=days_val)).date()
+                summary = (
+                    df_all[df_all["date"] >= cutoff]
+                    .groupby("disease")
+                    .agg(案例數=("id", "count"),
+                         疑似=("status", lambda x: (x == "suspected").sum()),
+                         確診=("status", lambda x: (x == "confirmed").sum()))
+                    .reset_index()
+                )
+                summary["disease"] = summary["disease"].map(
+                    lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
+                )
+                summary.columns = ["疾病", f"近{days_val}天案例", "　疑似", "　確診"]
+                st.dataframe(summary, use_container_width=True, hide_index=True)
 
-    # ── Tab 3：案例明細 & 通報單（左右分割面板） ─────────────────────────────────
+    # ── Tab 3：案例明細 & 通報單（左右分割，各自內捲） ───────────────────────────
     with tab_cases:
         if df.empty:
             st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件。")
         else:
-            list_col, view_col = st.columns([0.42, 0.58], gap="medium")
+            list_col, view_col = st.columns([0.40, 0.60], gap="small")
 
-            # ── 左：案例列表 ─────────────────────────────────────────────────
+            # ── 左：固定高度捲動清單 ─────────────────────────────────────────
             with list_col:
-                st.caption(f"共 {len(df)} 筆案例（顯示最近 50 筆）｜點 📋 查閱通報單")
+                st.caption(
+                    f"共 {len(df)} 筆（最近 50 筆）｜點 📋 查閱通報單",
+                    help="點選任一列的 📋 按鈕，右側即顯示 eICR 通報單內容",
+                )
+                # 捲動容器
+                with st.container(height=LIST_H, border=True):
+                    # 表頭（固定在捲動容器內最頂部）
+                    COLS = [0.28, 1.55, 1.45, 1.15, 1.05, 0.72]
+                    hcols = st.columns(COLS)
+                    for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
+                        col.markdown(
+                            f"<b style='font-size:0.8rem;color:#555'>{lbl}</b>",
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown(
+                        "<hr style='margin:2px 0;border-color:#ddd'>",
+                        unsafe_allow_html=True,
+                    )
 
-                # 標頭
-                hcols = st.columns([0.35, 1.7, 1.5, 1.3, 1.2, 0.5])
-                for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", ""]):
-                    col.markdown(
-                        f"<span style='font-size:0.82rem;font-weight:600;color:#555'>{lbl}</span>",
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("<hr style='margin:3px 0 1px;border-color:#ccc'>",
-                            unsafe_allow_html=True)
+                    view_df  = df.head(50).reset_index(drop=True)
+                    sel_idx  = ss.get("eicr_index", -1)
 
-                view_df = df.head(50).reset_index(drop=True)
-                sel_idx = ss.get("eicr_index", -1)
+                    for i, row in view_df.iterrows():
+                        is_sel = (i == sel_idx)
+                        hl     = "background:#EDF4FF;border-radius:4px;" if is_sel else ""
+                        rcols  = st.columns(COLS)
+                        d_zh   = (f"{DISEASE_EMOJI.get(row['disease'],'')} "
+                                  f"{DISEASE_ZH.get(row['disease'], row['disease'])}")
+                        s_zh   = STATUS_LABEL.get(row["status"], row["status"])
+                        dt_str = (row["report_date"].strftime("%m/%d")
+                                  if pd.notna(row["report_date"]) else "")
 
-                for i, row in view_df.iterrows():
-                    is_selected = (i == sel_idx)
-                    bg = "background:#EDF4FF;" if is_selected else ""
-                    rcols = st.columns([0.35, 1.7, 1.5, 1.3, 1.2, 0.5])
-                    d_zh  = f"{DISEASE_EMOJI.get(row['disease'],'')} {DISEASE_ZH.get(row['disease'], row['disease'])}"
-                    s_zh  = STATUS_LABEL.get(row["status"], row["status"])
-                    rcols[0].markdown(
-                        f"<span style='color:#bbb;font-size:0.8rem;{bg}'>{i+1}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    rcols[1].markdown(
-                        f"<span style='font-size:0.9rem;{bg}font-weight:{'600' if is_selected else '400'}'>"
-                        f"{row['patient_name']}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    rcols[2].markdown(
-                        f"<span style='font-size:0.87rem'>{d_zh}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    rcols[3].markdown(
-                        f"<span style='font-size:0.87rem'>{row['county']}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    rcols[4].markdown(
-                        f"<span style='font-size:0.87rem'>{s_zh}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    if rcols[5].button(
-                        "📋", key=f"view_{i}", help="查閱 eICR 通報單",
-                        type="primary" if is_selected else "secondary",
-                    ):
-                        ss["eicr_case"]  = df.iloc[i]
-                        ss["eicr_index"] = i
-                        st.rerun()
+                        rcols[0].markdown(
+                            f"<span style='color:#bbb;font-size:0.78rem'>{i+1}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        rcols[1].markdown(
+                            f"<span style='{hl}font-size:0.88rem;"
+                            f"font-weight:{'600' if is_sel else '400'}'>"
+                            f"{row['patient_name']}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        rcols[2].markdown(
+                            f"<span style='font-size:0.82rem'>{d_zh}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        rcols[3].markdown(
+                            f"<span style='font-size:0.85rem'>{row['county']}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        rcols[4].markdown(
+                            f"<span style='font-size:0.82rem'>{s_zh}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        # 📋 按鈕：最後一欄夠寬，不會被擠
+                        if rcols[5].button(
+                            "📋", key=f"v_{i}",
+                            help=f"查閱 {row['patient_name']} 的 eICR 通報單",
+                            type="primary" if is_sel else "secondary",
+                            use_container_width=True,
+                        ):
+                            ss["eicr_case"]  = df.iloc[i]
+                            ss["eicr_index"] = i
+                            st.rerun()
 
-            # ── 右：eICR 通報單面板 ───────────────────────────────────────────
+            # ── 右：eICR 通報單固定高度捲動面板 ─────────────────────────────
             with view_col:
                 if not is_viewing:
+                    # 佔位提示，高度與左欄對齊
                     st.markdown(
-                        "<div style='height:200px;display:flex;align-items:center;"
-                        "justify-content:center;border:2px dashed #ccc;"
-                        "border-radius:12px;color:#aaa;font-size:1rem'>"
-                        "← 點選左側案例的 📋 圖示查閱 eICR 通報單"
-                        "</div>",
+                        f"<div style='height:{LIST_H}px;display:flex;"
+                        f"align-items:center;justify-content:center;"
+                        f"border:2px dashed #ccc;border-radius:8px;"
+                        f"color:#bbb;font-size:1rem'>"
+                        f"← 點選左側 📋 按鈕查閱 eICR 通報單</div>",
                         unsafe_allow_html=True,
                     )
                 else:
-                    sel = ss["eicr_case"]
+                    sel   = ss["eicr_case"]
                     sel_d = DISEASE_ZH.get(sel["disease"], sel["disease"])
                     sel_s = STATUS_LABEL.get(sel["status"], sel["status"])
 
-                    # 通報單標題列 + 關閉按鈕
-                    title_row, close_btn = st.columns([5, 1])
-                    with title_row:
+                    # 標題列（捲動容器外，固定顯示）
+                    t_col, c_col = st.columns([5, 1])
+                    with t_col:
                         st.markdown(
-                            f"**{DISEASE_EMOJI.get(sel['disease'],'')} {sel['patient_name']}**"
-                            f"　{sel_d}　{sel_s}　{sel['county']}"
+                            f"**{DISEASE_EMOJI.get(sel['disease'],'')} "
+                            f"{sel['patient_name']}**　"
+                            f"{sel_d}　{sel_s}　{sel['county']}"
                         )
-                    with close_btn:
-                        if st.button("✕ 關閉", key="close_eicr"):
+                    with c_col:
+                        if st.button("✕ 關閉", key="close_eicr", use_container_width=True):
                             del ss["eicr_case"]
                             ss.pop("eicr_index", None)
                             st.rerun()
 
-                    eicr = parse_eicr(sel.get("eicr_path", ""))
-                    if eicr is None:
-                        st.error("⚠️ 找不到 eICR 檔案（可能為舊版資料）。")
-                    else:
-                        render_eicr_panel(eicr, hospital_name=hospital_name)
+                    # 通報單本體（固定高度，可在內部捲動）
+                    panel_h = LIST_H - 42   # 扣掉標題列高度
+                    with st.container(height=panel_h, border=True):
+                        eicr = parse_eicr(sel.get("eicr_path", ""))
+                        if eicr is None:
+                            st.error("⚠️ 找不到 eICR 檔案。")
+                        else:
+                            render_eicr_panel(eicr, hospital_name=hospital_name)
 
     # ── Tab 4：設定 ─────────────────────────────────────────────────────────────
     with tab_settings:
-        st.markdown("#### 🏥 通報院所設定")
-        new_hospital = st.text_input("通報醫院名稱（顯示於通報單與 PDF）",
-                                     value=hospital_name,
-                                     help="此名稱將印在 PDF 通報單的「通報醫療院所」欄")
+        with st.container(height=TAB_H, border=False):
+            s1, s2 = st.columns(2)
+            with s1:
+                st.markdown("#### 🏥 通報院所")
+                new_hospital = st.text_input(
+                    "醫院名稱（顯示於通報單與 PDF）", value=hospital_name)
+                st.markdown("#### 🗄️ 資料來源")
+                new_db = st.text_input("SQLite 資料庫路徑", value=db_path_val)
+                st.markdown("#### 🔍 篩選條件")
+                new_disease = st.selectbox(
+                    "疾病類型",
+                    ["全部", "COVID-19", "Dengue", "Influenza"],
+                    index=["全部", "COVID-19", "Dengue", "Influenza"].index(disease_val),
+                    format_func=lambda x: f"{DISEASE_EMOJI.get(x,'📊')} {DISEASE_ZH.get(x,x)}",
+                )
+                new_status = st.selectbox(
+                    "案例狀態",
+                    ["全部", "suspected", "confirmed"],
+                    index=["全部", "suspected", "confirmed"].index(status_val),
+                    format_func=lambda x: {
+                        "全部": "全部", "suspected": "🟡 疑似", "confirmed": "🔴 確診"
+                    }.get(x, x),
+                )
+                new_days = st.slider("趨勢圖天數範圍", 7, 60, days_val, 7)
+                if st.button("✅ 套用設定", type="primary", use_container_width=True):
+                    ss["cfg_hospital"]       = new_hospital
+                    ss["cfg_db_path"]        = new_db
+                    ss["cfg_disease_filter"] = new_disease
+                    ss["cfg_status_filter"]  = new_status
+                    ss["cfg_days_range"]     = new_days
+                    st.cache_data.clear()
+                    st.success("✅ 設定已套用！")
+                    st.rerun()
 
-        st.markdown("#### 🗄️ 資料來源")
-        new_db = st.text_input("SQLite 資料庫路徑", value=db_path_val)
+            with s2:
+                st.markdown("#### 📊 系統資訊")
+                st.markdown(f"- **資料庫**：`{db_path_val}`")
+                st.markdown(f"- **通報院所**：{hospital_name}")
+                st.markdown(f"- **總案例數**：{total_all} 筆（今日 +{today_all}）")
+                st.markdown(f"- **自動刷新**：每 {REFRESH_INTERVAL_MS//1000} 秒")
+                st.markdown("- **標準**：FHIR R4 · MedMorph · HL7 eICR")
+                st.markdown("---")
+                st.markdown("#### 📌 使用說明")
+                st.markdown(
+                    "1. **案例明細** Tab → 找到想查閱的案例\n"
+                    "2. 點按最右側 **📋** 按鈕\n"
+                    "3. 右側面板即時顯示 eICR 通報單（可在面板內捲動）\n"
+                    "4. 點「**📄 下載 PDF 通報單**」輸出正式格式\n"
+                    "5. 點「**✕ 關閉**」返回清單模式\n\n"
+                    "| 疾病 | SNOMED-CT | LOINC |\n"
+                    "|------|-----------|-------|\n"
+                    "| COVID-19 | 840539006 | 94531-1 |\n"
+                    "| 登革熱 | 38362002 | 86615-1 |\n"
+                    "| 流感 | 57386000 | 92142-9 |"
+                )
 
-        st.markdown("#### 🔍 篩選條件")
-        new_disease = st.selectbox(
-            "疾病類型",
-            ["全部", "COVID-19", "Dengue", "Influenza"],
-            index=["全部", "COVID-19", "Dengue", "Influenza"].index(disease_val),
-            format_func=lambda x: f"{DISEASE_EMOJI.get(x,'📊')} {DISEASE_ZH.get(x,x)}",
-        )
-        new_status = st.selectbox(
-            "案例狀態",
-            ["全部", "suspected", "confirmed"],
-            index=["全部", "suspected", "confirmed"].index(status_val),
-            format_func=lambda x: {"全部":"全部","suspected":"🟡 疑似","confirmed":"🔴 確診"}.get(x,x),
-        )
-        new_days = st.slider("趨勢圖天數範圍", 7, 60, days_val, 7)
-
-        if st.button("✅ 套用設定", type="primary"):
-            ss["cfg_hospital"]       = new_hospital
-            ss["cfg_db_path"]        = new_db
-            ss["cfg_disease_filter"] = new_disease
-            ss["cfg_status_filter"]  = new_status
-            ss["cfg_days_range"]     = new_days
-            st.cache_data.clear()
-            st.success("✅ 設定已套用！")
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("#### 📊 系統資訊")
-        ia, ib = st.columns(2)
-        with ia:
-            st.markdown(f"- **資料庫**：`{db_path_val}`")
-            st.markdown(f"- **總案例數**：{total_all} 筆 （今日 +{today_all}）")
-            st.markdown(f"- **通報院所**：{hospital_name}")
-        with ib:
-            st.markdown(f"- **自動刷新**：每 {REFRESH_INTERVAL_MS//1000} 秒")
-            st.markdown("- **標準**：HL7 FHIR R4 · MedMorph IG · HL7 eICR")
-            st.markdown("- **查閱 eICR 時**：自動暫停刷新")
-
-        st.markdown("---")
-        st.markdown("#### 📌 使用說明")
-        st.markdown(
-            "1. 切換至「📋 案例明細」分頁，找到想查閱的案例\n"
-            "2. 點選該列最右側 **📋** 圖示\n"
-            "3. 通報單在列表下方展開；刷新**自動暫停**，不會跳掉\n"
-            "4. 點「⬇️ 下載 PDF 通報單」存成 PDF（格式仿衛福部傳染病個案通報單）\n"
-            "5. 點「✕ 關閉」後，自動刷新恢復"
-        )
-        st.markdown("---")
-        st.markdown(
-            "**NTU 智慧醫療期末專題 · 第五組**\n\n"
-            "| 疾病 | SNOMED-CT | LOINC 面板 |\n"
-            "|------|-----------|------------|\n"
-            "| COVID-19 | 840539006 | 94531-1 |\n"
-            "| 登革熱 | 38362002 | 86615-1 |\n"
-            "| 流感 | 57386000 | 92142-9 |"
-        )
-
-    st.markdown("---")
-    st.caption("🏥 NTU 智慧醫療期末專題 · 第五組 · FHIR R4 · MedMorph · HL7 eICR")
+    st.markdown(
+        "<p style='text-align:center;font-size:0.75rem;color:#ccc;margin:0'>"
+        "NTU 智慧醫療期末專題 · 第五組 · FHIR R4 · MedMorph · HL7 eICR</p>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
