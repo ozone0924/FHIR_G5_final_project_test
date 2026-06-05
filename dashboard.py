@@ -1242,7 +1242,7 @@ def main():
 
             with list_col:
                 with st.container(height=CASES_LIST_H, border=True):
-                    COLS = [0.20, 0.90, 1.45, 0.90, 0.82, 0.58]
+                    COLS = [0.28, 0.90, 1.45, 0.90, 0.82, 0.58]
                     hcols = st.columns(COLS, gap="small")
                     for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
                         extra = "text-align:center;white-space:nowrap;" if lbl == "通報單" else ""
@@ -1266,7 +1266,7 @@ def main():
                         s_zh   = STATUS_LABEL.get(row["status"], row["status"])
 
                         rcols[0].markdown(
-                            f"<span style='color:#bbb;font-size:0.78rem'>{i+1}</span>",
+                            f"<span style='color:#bbb;font-size:0.78rem;white-space:nowrap'>{i+1}</span>",
                             unsafe_allow_html=True,
                         )
                         rcols[1].markdown(
