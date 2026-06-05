@@ -426,7 +426,7 @@ def create_submission(case_id: str, bundle_id: str, submitted_at: str,
         success     = random.random() < 0.90
         response    = "accepted" if success else "error"
         task_status = "completed" if success else "rejected"
-        note        = ("eICR 已成功送達疾管署通報系統（NSSP），Task 已完成"
+        note        = ("eICR 已成功送達疾管署通報系統（NSSP），通報已完成"
                        if success else "送出失敗：NSSP 暫時無回應，建議重新送出")
         next_check_at = None
         retry_count   = 0
@@ -490,7 +490,7 @@ def process_pending_submissions(db_path: str = DB_PATH) -> int:
                            response='accepted', task_status='completed',
                            ack_at=?, note=? WHERE id=?""",
                         (now_str,
-                         "eICR 已成功送達疾管署通報系統（NSSP），Task 已完成",
+                         "eICR 已成功送達疾管署通報系統（NSSP），通報已完成",
                          sub_id),
                     )
                     log.info("✅ [NSSP] 通報 %-12s → accepted", sub_id)

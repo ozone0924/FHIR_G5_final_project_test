@@ -43,7 +43,10 @@ def main():
         key = sys.argv[1].lower()
         if key in COMMANDS:
             _, cmd = COMMANDS[key]
-            run_cmd(cmd)
+            # 將 main.py 之後的額外參數原封不動轉發給子指令
+            # 例如：main.py seed --count 1000 --days 90
+            extra = sys.argv[2:]
+            run_cmd(cmd + extra)
         else:
             print(f"未知指令：{key}")
             print(f"可用指令：{', '.join(COMMANDS)}")
