@@ -1049,11 +1049,11 @@ def main():
             # ── 第二列：疾病 toggle ───────────────────────────────────────
             _, tc1, tc2, tc3 = st.columns([4, 1, 1, 1])
             s_covid  = tc1.checkbox(f"{DISEASE_EMOJI['COVID-19']} COVID-19",
-                                    value=True, key="map_d_covid")
+                                    value=False, key="map_d_covid")
             s_dengue = tc2.checkbox(f"{DISEASE_EMOJI['Dengue']} 登革熱",
-                                    value=True, key="map_d_dengue")
+                                    value=False, key="map_d_dengue")
             s_flu    = tc3.checkbox(f"{DISEASE_EMOJI['Influenza']} 流感",
-                                    value=True, key="map_d_flu")
+                                    value=False, key="map_d_flu")
 
             sel_d = [d for d, s in [
                 ("COVID-19", s_covid), ("Dengue", s_dengue), ("Influenza", s_flu)
