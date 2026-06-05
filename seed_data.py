@@ -29,14 +29,6 @@ from medmorph_engine import (
     random_hospital, random_home,
 )
 
-# ── 基本資料 ───────────────────────────────────────────────────────────────────
-SURNAMES    = ["王", "李", "張", "劉", "陳", "楊", "黃", "趙", "吳", "周",
-               "林", "徐", "孫", "馬", "朱", "胡", "郭", "何", "高", "鄭",
-               "羅", "梁", "宋", "謝", "唐", "韓", "曹", "許", "鄧", "洪"]
-GIVEN_NAMES = ["小明", "小華", "大偉", "美玲", "志遠", "雅婷", "建宏", "淑芬",
-               "冠廷", "怡君", "俊傑", "曉雯", "彥廷", "佳穎", "宇軒", "思穎",
-               "宗翰", "育誠", "嘉豪", "淑媛", "奕辰", "詩涵", "智偉", "郁婷"]
-
 # 縣市人口權重（用於呼吸道疾病的病例分布）
 COUNTY_POP = {
     "台北市": 22, "新北市": 18, "桃園市": 12, "台中市": 11,
@@ -193,9 +185,28 @@ OUTBREAKS: list[dict] = [
     },
 ]
 
-
-def random_name() -> str:
-    return random.choice(SURNAMES) + random.choice(GIVEN_NAMES)
+def _random_tw_name(gender: str) -> str:
+    surnames = [
+        "陳", "林", "黃", "張", "李", "王", "吳", "劉", "蔡", "楊",
+        "許", "鄭", "謝", "洪", "郭", "邱", "曾", "廖", "賴", "徐",
+    ]
+    male_names = [
+        "志豪", "冠廷", "建宏", "俊傑", "柏翰", "承恩", "宇軒", "智偉", "偉誠", "嘉豪",
+        "明哲", "政廷", "宗翰", "家豪", "育誠", "信宏", "文傑", "冠宇", "彥廷", "柏宇",
+        "育廷", "建銘", "志銘", "俊宏", "承翰", "宇翔", "奕辰", "恩碩", "宥廷", "冠儒",
+        "致遠", "子軒", "家瑋", "柏鈞", "建勳", "俊良", "志強", "明憲", "宗慶", "育維",
+        "佳賢", "品睿", "奕勳", "冠穎", "聖傑", "建宇", "威廷", "彥成", "宥翔", "柏叡",
+    ]
+    female_names = [
+        "雅婷", "淑芬", "怡君", "美玲", "淑娟", "佳穎", "惠珊", "靜怡", "婉婷", "欣怡",
+        "詩涵", "采潔", "嘉玲", "美惠", "郁婷", "冠儀", "佩珊", "宜君", "雅惠", "淑媛",
+        "怡婷", "惠君", "佳琳", "靜雅", "婉君", "欣瑜", "詩婷", "采薇", "嘉慧", "美雲",
+        "郁涵", "冠伶", "佩君", "宜珊", "雅君", "淑玲", "怡珊", "惠玲", "佳蓉", "靜雯",
+        "婉玲", "欣宜", "詩雅", "采琳", "嘉芬", "美華", "郁君", "冠潔", "佩伶", "宜芳",
+    ]
+    surname = random.choice(surnames)
+    first   = random.choice(male_names if gender.lower() == "male" else female_names)
+    return f"{surname}{first}"
 
 
 def random_birthdate() -> str:
@@ -208,6 +219,9 @@ def random_birthdate() -> str:
 def _epidemic_curve_weight(t: float, peak: float, sigma: float) -> float:
     """Gaussian epidemic curve weight at time t"""
     return math.exp(-0.5 * ((t - peak) / sigma) ** 2)
+
+
+_BASE_COUNT = sum(o["total_cases"] for o in OUTBREAKS)   # 各波 total_cases 總和
 
 
 def generate_realistic_cases(days_back: int = 180,
@@ -314,7 +328,7 @@ def generate_realistic_cases(days_back: int = 180,
             all_cases.append({
                 "patient": {
                     "id":               f"patient-{uuid.uuid4().hex[:10]}",
-                    "name":             random_name(),
+                    "name":             _random_tw_name(gender),
                     "birthDate":        random_birthdate(),
                     "gender":           gender,
                     "county":           county,
@@ -347,13 +361,16 @@ def generate_realistic_cases(days_back: int = 180,
 
 # ── 種入資料庫 ─────────────────────────────────────────────────────────────────
 
-def seed(days_back: int = 180, scale: float = 1.0,
+def seed(count: int = _BASE_COUNT, days_back: int = 180,
          db_path: str = DB_PATH, output_dir: str = OUTPUT_DIR) -> None:
-
-    total_target = int(sum(o["total_cases"] for o in OUTBREAKS) * scale)
-    print(f"🌱 產生真實疾病擴散 mock 資料（~{total_target} 筆，過去 {days_back} 天）…")
+    """
+    count    : 目標總案例數（各波依比例分配）
+    days_back: 時間視窗（天數）
+    """
+    scale = count / _BASE_COUNT
+    print(f"🌱 產生真實疾病擴散 mock 資料（目標 {count} 筆，過去 {days_back} 天）…")
     for o in OUTBREAKS:
-        print(f"   - {o['label']}：目標 {int(o['total_cases']*scale)} 筆")
+        print(f"   - {o['label']}：目標 ~{int(o['total_cases']*scale)} 筆")
 
     init_db(db_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -452,11 +469,13 @@ def seed(days_back: int = 180, scale: float = 1.0,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="真實疾病擴散 mock 資料")
-    parser.add_argument("--days",  type=int,   default=180, help="資料涵蓋天數（預設 180）")
-    parser.add_argument("--scale", type=float, default=1.0, help="案例數縮放倍率（預設 1.0）")
-    parser.add_argument("--db",    type=str,   default=DB_PATH,    help="SQLite 路徑")
-    parser.add_argument("--output",type=str,   default=OUTPUT_DIR, help="eICR 輸出目錄")
+    parser.add_argument("--count",  type=int, default=_BASE_COUNT,
+                        help=f"目標總案例數（預設 {_BASE_COUNT}，各波依比例分配）")
+    parser.add_argument("--days",   type=int, default=180,
+                        help="資料涵蓋天數（預設 180）")
+    parser.add_argument("--db",     type=str, default=DB_PATH,    help="SQLite 路徑")
+    parser.add_argument("--output", type=str, default=OUTPUT_DIR, help="eICR 輸出目錄")
     args = parser.parse_args()
 
-    seed(days_back=args.days, scale=args.scale,
+    seed(count=args.count, days_back=args.days,
          db_path=args.db, output_dir=args.output)

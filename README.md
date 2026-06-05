@@ -81,10 +81,11 @@ pip install -r requirements.txt
 > 僅在初次使用、或需要重置 demo 資料時執行。正常使用由 MedMorph 引擎即時產生案例，無需手動 seed。
 
 ```bash
-python seed_data.py
+python seed_data.py                          # 預設 ~360 筆，180 天
+python seed_data.py --count 200 --days 90   # 自訂筆數與時間跨度
 ```
 
-執行後會自動建立 `data/cases.db` 和 `output/` 資料夾，並印出案例分布統計。
+執行後會自動建立 `data/cases.db` 和 `output/` 資料夾，依照 5 波爆發模型（COVID×2、流感×1、登革熱×2）產生符合真實流行病學分布的案例，並印出統計摘要。
 
 ---
 
