@@ -998,14 +998,16 @@ def main():
         justify-content: center !important;
         padding-left: 0 !important;
         padding-right: 0 !important;
+        overflow: hidden !important;
     }
     [data-testid="stButton"] > button p {
         margin: 0 !important;
         padding: 0 !important;
-        line-height: 1 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
+        line-height: 1.2 !important;
+        text-align: center !important;
+        width: 100% !important;
+        overflow: hidden !important;
+        white-space: nowrap !important;
     }
     </style>""", unsafe_allow_html=True)
 
