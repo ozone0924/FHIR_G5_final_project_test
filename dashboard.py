@@ -394,6 +394,7 @@ def main():
 
     st.markdown("""
     <style>
+    /* ── KPI 卡片 ── */
     .metric-card {
         border-radius:12px;padding:18px 20px;color:white;
         text-align:center;box-shadow:0 3px 10px rgba(0,0,0,0.12);
@@ -402,8 +403,42 @@ def main():
     .metric-value{font-size:2.6rem;font-weight:700;line-height:1}
     .metric-label{font-size:0.9rem;opacity:0.85;margin-top:4px}
     .metric-sub  {font-size:0.75rem;opacity:0.6;margin-top:4px}
-    /* 案例列 hover */
-    .case-row:hover{background:#f0f6ff!important;cursor:pointer}
+
+    /* ── Tab 按鈕 ── */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 6px;
+        background: transparent;
+        border-bottom: 2px solid #E0E6F0;
+        padding-bottom: 0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 52px;
+        min-width: 155px;
+        padding: 0 22px;
+        background: #F0F4FA;
+        border-radius: 10px 10px 0 0;
+        border: 1.5px solid #D0DBF0;
+        border-bottom: none;
+        font-size: 1.02rem !important;
+        font-weight: 600 !important;
+        color: #4A6FA5 !important;
+        transition: background 0.2s, color 0.2s;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background: #E3EBF8;
+        color: #003F87 !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background: white !important;
+        color: #003F87 !important;
+        border-color: #003F87 #D0DBF0 white !important;
+        border-bottom: 2px solid white !important;
+        box-shadow: 0 -2px 8px rgba(0,63,135,0.08);
+    }
+    /* Tab 內容區 */
+    .stTabs [data-baseweb="tab-panel"] {
+        padding-top: 18px;
+    }
     </style>""", unsafe_allow_html=True)
 
     # 從 session_state 讀取篩選設定
