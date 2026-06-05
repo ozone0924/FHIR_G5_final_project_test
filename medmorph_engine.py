@@ -402,16 +402,18 @@ def create_submission(case_id: str, bundle_id: str, submitted_at: str,
     doc_ref_id = f"docref-{uuid.uuid4().hex[:8]}"
     comm_id    = f"comm-{uuid.uuid4().hex[:8]}"
 
+    now_utc = datetime.now(timezone.utc)
+
     if live:
-        # 即時模式：寫入 pending，由 process_pending_submissions() 在延遲後決定結果
-        delay_sec   = random.randint(10, 100)
-        next_check  = (datetime.now(timezone.utc) + timedelta(seconds=delay_sec))
-        next_check_at = next_check.strftime("%Y-%m-%dT%H:%M:%SZ")
-        task_status = "in-progress"
-        response    = "pending"
-        ack_at      = None
-        note        = f"eICR 已送出，等待 NSSP 回應（預計 {delay_sec} 秒內）"
-        retry_count = 0
+        # 即時模式：submitted_at = 現在（引擎送出時刻），確保儀表板 list 排在最頂端
+        submitted_at  = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        delay_sec     = random.randint(10, 100)
+        next_check_at = (now_utc + timedelta(seconds=delay_sec)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        task_status   = "in-progress"
+        response      = "pending"
+        ack_at        = None
+        note          = f"eICR 已送出，等待 NSSP 回應（預計 {delay_sec} 秒內）"
+        retry_count   = 0
     else:
         # seed / 歷史模式：立即模擬 NSSP 回應（5 分鐘 ~ 2 小時後）
         try:

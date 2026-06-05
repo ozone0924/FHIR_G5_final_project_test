@@ -1439,31 +1439,26 @@ def main():
                 st.markdown("<div style='margin:6px 0'></div>", unsafe_allow_html=True)
 
                 # 格式化表格
-                def status_badge(r):
+                def _sub_status(row) -> str:
+                    r  = row.get("response", "")
+                    ts = row.get("task_status", "")
+                    rc = int(row.get("retry_count") or 0)
                     if r == "accepted":
-                        return "✅ Accepted"
+                        return "✅ 已接受"
                     if r == "error":
-                        return "❌ Error"
-                    return "⏳ Pending"
+                        return "🚫 失敗（超過重試上限）" if ts == "failed" else "❌ 被拒絕"
+                    if r == "pending":
+                        return f"🔄 重試中（{rc}/3）" if rc > 0 else "⏳ 待回應"
+                    return r or ts
 
                 display = sdf.head(50).copy()
                 display["通報時間 (TPE)"] = display["submitted_at"].apply(
                     lambda r: r.astimezone(TZ_TPE).strftime("%m/%d %H:%M") if pd.notna(r) else ""
                 )
                 display["回應時間 (TPE)"] = display["ack_at"].apply(
-                    lambda r: r.astimezone(TZ_TPE).strftime("%m/%d %H:%M") if pd.notna(r) else ""
+                    lambda r: r.astimezone(TZ_TPE).strftime("%m/%d %H:%M") if pd.notna(r) else "—"
                 )
-                display["狀態"] = display["response"].apply(status_badge)
-                display["Task 狀態"] = display["task_status"].map(
-                    {"completed":   "✅ completed",
-                     "rejected":    "❌ rejected",
-                     "failed":      "🚫 failed",
-                     "in-progress": "🔄 in-progress",
-                     "requested":   "⏳ requested"}
-                ).fillna(display["task_status"])
-                display["重試次數"] = display["retry_count"].fillna(0).astype(int).apply(
-                    lambda n: f"{n} 次" if n > 0 else "—"
-                )
+                display["通報狀態"] = display.apply(_sub_status, axis=1)
                 display["疾病"] = display["disease"].map(
                     lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
                 )
@@ -1471,7 +1466,7 @@ def main():
                 st.dataframe(
                     display[[
                         "patient_name", "疾病", "county",
-                        "狀態", "Task 狀態", "重試次數",
+                        "通報狀態",
                         "通報時間 (TPE)", "回應時間 (TPE)", "note",
                     ]].rename(columns={
                         "patient_name": "病患", "county": "縣市", "note": "備註"
