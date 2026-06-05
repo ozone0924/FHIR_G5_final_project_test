@@ -1,245 +1,254 @@
 """
-pdf_report.py — eICR 通報單 PDF 產生器（黑白正式格式）
-========================================================
-採用 reportlab 內建 STSong-Light CID 字型，
-無需外部字型檔，中文字完整顯示。
-
-格式參照：衛生福利部疾病管制署 傳染病個案通報單（簡化版）
+pdf_report.py — eICR 通報單 PDF 產生器
+字型：STHeiti Medium.ttc 提取繁體子字型，由 fpdf2 直接 Unicode 映射
+格式：仿衛福部疾病管制署「傳染病個案通報單」，黑白正式版
 """
 
 import io
+import os
+import tempfile
 from datetime import datetime
 
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase import pdfmetrics
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Table, TableStyle,
-    Spacer, HRFlowable,
-)
-from reportlab.lib import colors
+from fpdf import FPDF
 
-# ── 字型：STSong-Light 為 reportlab 內建 CJK CID 字型 ─────────────────────────
-pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+# ── 字型準備 ──────────────────────────────────────────────────────────────────
+_TMP_FONT_PATH: str | None = None
 
-FONT  = "STSong-Light"
-BLACK = colors.black
-GRAY  = colors.HexColor("#444444")
-LGRAY = colors.HexColor("#AAAAAA")
-WHITE = colors.white
-
-W = 170 * mm  # 頁面可用寬
+_TTC_CANDIDATES = [
+    ("/System/Library/Fonts/STHeiti Medium.ttc", 0),   # macOS — 繁體確認可用
+    ("/System/Library/Fonts/STHeiti Light.ttc",  0),   # macOS 備援
+    ("/System/Library/Fonts/PingFang.ttc",       0),   # macOS PingFang
+]
 
 
-# ── 工具 ──────────────────────────────────────────────────────────────────────
+def _prepare_font() -> str | None:
+    """從 TTC 提取第 idx 號子字型至暫存 TTF，供 fpdf2 使用。"""
+    global _TMP_FONT_PATH
+    if _TMP_FONT_PATH and os.path.exists(_TMP_FONT_PATH):
+        return _TMP_FONT_PATH
+
+    for path, idx in _TTC_CANDIDATES:
+        if not os.path.exists(path):
+            continue
+        try:
+            from fontTools.ttLib import TTCollection
+            ttc = TTCollection(path)
+            font = ttc.fonts[idx]
+            buf = io.BytesIO()
+            font.save(buf)
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".ttf", prefix="eicr_font_", delete=False
+            )
+            tmp.write(buf.getvalue())
+            tmp.close()
+            _TMP_FONT_PATH = tmp.name
+            return _TMP_FONT_PATH
+        except Exception:
+            continue
+    return None
+
+
+# ── 工具函式 ──────────────────────────────────────────────────────────────────
 
 def _fmt_dt(iso: str) -> str:
     if not iso:
-        return "　"
+        return "—"
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y/%m/%d %H:%M")
     except Exception:
         return iso
 
 
-def _p(text: str, size: int = 10, bold: bool = False,
-       align: str = "LEFT") -> Paragraph:
-    alignment = {"LEFT": 0, "CENTER": 1, "RIGHT": 2}.get(align, 0)
-    style = ParagraphStyle(
-        "p",
-        fontName=FONT,
-        fontSize=size,
-        leading=size * 1.5,
-        alignment=alignment,
-        textColor=BLACK,
-        wordWrap="CJK",
-    )
-    # bold 用底線模擬（CID 字型無粗體變體）
-    txt = f"<u>{text}</u>" if bold else str(text)
-    return Paragraph(txt, style)
+# ── PDF 表單類別 ──────────────────────────────────────────────────────────────
 
+class _NotificationForm(FPDF):
+    F  = "CJK"
+    PW = 170   # 可用寬度 mm（A4 210 - 左右各 20mm）
+    LW = 35    # 標籤欄寬 mm
+    RH = 7     # 列高 mm
 
-def _section(title: str) -> list:
-    """區段標題 + 分隔線"""
-    return [
-        Spacer(1, 4 * mm),
-        _p(f"【{title}】", size=11, bold=True),
-        HRFlowable(width=W, thickness=0.8, color=BLACK),
-        Spacer(1, 1.5 * mm),
-    ]
+    def __init__(self, font_path: str):
+        super().__init__(format="A4")
+        self.set_margins(20, 18, 20)
+        self.set_auto_page_break(True, margin=20)
+        self.add_font(self.F, style="", fname=font_path)
+        self.add_page()
 
+    def _f(self, sz: int):
+        self.set_font(self.F, size=sz)
 
-def _table(rows: list[list[str]], col_w: list[float]) -> Table:
-    """欄位資料表（奇數欄位為 label，偶數為值）"""
-    def cell(text: str, is_label: bool) -> Paragraph:
-        return _p(text, size=9 if is_label else 10)
+    def _gray(self, val: int = 235):
+        self.set_fill_color(val, val, val)
 
-    data = [
-        [cell(c, i % 2 == 0) for i, c in enumerate(row)]
-        for row in rows
-    ]
-    tbl = Table(data, colWidths=col_w)
-    tbl.setStyle(TableStyle([
-        ("GRID",          (0, 0), (-1, -1), 0.5, LGRAY),
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 5),
-        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        # label 欄（0, 2, 4…）淺灰底
-        ("BACKGROUND",    (0, 0), (0, -1), colors.HexColor("#F2F2F2")),
-        ("BACKGROUND",    (2, 0), (2, -1), colors.HexColor("#F2F2F2")),
-    ]))
-    return tbl
+    def _white(self):
+        self.set_fill_color(255, 255, 255)
+        self.set_text_color(0, 0, 0)
+
+    def hr(self, thick: float = 0.5):
+        self.set_line_width(thick)
+        self.set_draw_color(0, 0, 0)
+        self.line(self.l_margin, self.get_y(),
+                  self.l_margin + self.PW, self.get_y())
+
+    def section(self, title: str):
+        self.ln(3)
+        self._f(11)
+        self._gray(220)
+        self.set_text_color(0, 0, 0)
+        self.cell(self.PW, 7, title, border=0, fill=True,
+                  new_x="LMARGIN", new_y="NEXT")
+        self.hr(0.5)
+        self.ln(2)
+
+    def row2(self, pairs: list[tuple[str, str]]):
+        """1 或 2 組 label/value，平均分配 PW。"""
+        n = len(pairs)
+        col = self.PW / n
+        val_w = col - self.LW
+        y0 = self.get_y()
+        for i, (lbl, val) in enumerate(pairs):
+            x = self.l_margin + i * col
+            self._f(9)
+            self._gray()
+            self.set_text_color(0, 0, 0)
+            self.set_xy(x, y0)
+            self.cell(self.LW, self.RH, str(lbl), border=1, fill=True)
+            self._f(10)
+            self._white()
+            self.set_xy(x + self.LW, y0)
+            self.cell(val_w, self.RH, str(val)[:40], border=1)
+        self.set_xy(self.l_margin, y0 + self.RH)
+
+    def wide_row(self, lbl: str, val: str):
+        """全寬單行：標籤 + 可換行的值。"""
+        val_w = self.PW - self.LW
+        y0 = self.get_y()
+        self._f(9)
+        self._gray()
+        self.set_text_color(0, 0, 0)
+        self.set_xy(self.l_margin, y0)
+        self.cell(self.LW, self.RH, lbl, border=1, fill=True)
+        self._f(10)
+        self._white()
+        self.set_xy(self.l_margin + self.LW, y0)
+        self.multi_cell(val_w, self.RH, str(val), border=1,
+                        new_x="LMARGIN", new_y="NEXT")
 
 
 # ── 主函式 ────────────────────────────────────────────────────────────────────
 
 def generate_eicr_pdf(eicr: dict, hospital_name: str = "XX 醫院") -> bytes:
-    """
-    產生傳染病個案通報單 PDF（黑白正式格式）。
+    """產生傳染病個案通報單 PDF（黑白正式格式，繁體中文完整支援）。"""
+    font_path = _prepare_font()
+    if not font_path:
+        raise RuntimeError("找不到支援繁體中文的字型檔（STHeiti / PingFang）")
 
-    Parameters
-    ----------
-    eicr          parse_eicr() 的回傳值
-    hospital_name 通報醫院名稱
-    """
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        topMargin=18 * mm, bottomMargin=20 * mm,
-        leftMargin=20 * mm, rightMargin=20 * mm,
+    pdf = _NotificationForm(font_path)
+    W = pdf.PW
+
+    # ── 頁首 ──────────────────────────────────────────────────────────────────
+    pdf._f(9)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(45, 8, "衛生福利部疾病管制署", align="L")
+    pdf._f(16)
+    pdf.cell(85, 8, "傳  染  病  個  案  通  報  單", align="C")
+    pdf._f(9)
+    bundle_date = _fmt_dt(eicr.get("bundle_ts", ""))
+    pdf.cell(40, 8, f"通報日期：{bundle_date}", align="R",
+             new_x="LMARGIN", new_y="NEXT")
+
+    pdf.hr(0.8)
+    pdf.ln(2)
+
+    pdf._f(10)
+    cond = eicr.get("condition", {})
+    pdf.cell(W / 2, 6, f"通報醫療院所：{hospital_name}", align="L")
+    pdf.cell(
+        W / 2, 6,
+        f"疾病別：{cond.get('disease','—')}　通報流水號：{eicr.get('bundle_id','')[:8].upper()}",
+        align="R", new_x="LMARGIN", new_y="NEXT",
     )
+    pdf.hr(0.3)
+    pdf.ln(2)
 
-    story = []
-    col2 = [38 * mm, W / 2 - 38 * mm, 38 * mm, W / 2 - 38 * mm]
+    # ── 壹、個案基本資料 ───────────────────────────────────────────────────────
+    pdf.section("壹、個案基本資料")
+    p = eicr.get("patient", {})
+    g = {"male": "男", "female": "女", "unknown": "未知"}.get(
+        p.get("gender", ""), p.get("gender", "—"))
+    pdf.row2([("姓　　名", p.get("name", "—")),    ("性　　別", g)])
+    pdf.row2([("出生日期", p.get("birthdate", "—")), ("居住地區", p.get("county", "—"))])
+    pdf.row2([("聯絡電話", p.get("phone", "—")),   ("身分證號", "（個資保護，略）")])
 
-    # ── 表頭 ─────────────────────────────────────────────────────────────────
-    header_data = [[
-        _p("衛生福利部疾病管制署", size=9, align="LEFT"),
-        _p("傳  染  病  個  案  通  報  單", size=16, bold=True, align="CENTER"),
-        _p(f"通報日期：{_fmt_dt(eicr['bundle_ts'])}", size=9, align="RIGHT"),
-    ]]
-    hdr = Table(header_data, colWidths=[45 * mm, 85 * mm, 40 * mm])
-    hdr.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    story.append(hdr)
-    story.append(HRFlowable(width=W, thickness=2, color=BLACK))
-
-    # 副標題
-    sub_data = [[
-        _p(f"通報醫療院所：{hospital_name}", size=10),
-        _p(
-            f"疾病別：{eicr['condition']['disease']}　"
-            f"通報流水號：{eicr['bundle_id'][:8].upper()}",
-            size=10, align="RIGHT"
-        ),
-    ]]
-    sub = Table(sub_data, colWidths=[W / 2, W / 2])
-    sub.setStyle(TableStyle([
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(sub)
-    story.append(HRFlowable(width=W, thickness=0.5, color=LGRAY))
-
-    # ── 壹、個案基本資料 ──────────────────────────────────────────────────────
-    story.extend(_section("壹、個案基本資料"))
-    p = eicr["patient"]
-    gender_zh = {"male": "男", "female": "女", "unknown": "未知"}.get(p["gender"], p["gender"])
-    story.append(_table([
-        ["姓　　名", p["name"],       "性　　別", gender_zh],
-        ["出生日期", p["birthdate"],  "居住地區", p["county"]],
-        ["聯絡電話", p["phone"],      "身分證號", "（個資保護，略）"],
-    ], col2))
-
-    # ── 貳、通報疾病資訊 ──────────────────────────────────────────────────────
-    story.extend(_section("貳、通報疾病資訊"))
-    cond = eicr["condition"]
+    # ── 貳、通報疾病資訊 ───────────────────────────────────────────────────────
+    pdf.section("貳、通報疾病資訊")
     clin_str = {
         "suspected": "■ 疑似  □ 確定",
         "confirmed": "□ 疑似  ■ 確定",
-    }.get(cond["clinical_status"], cond["clinical_status"])
-    story.append(_table([
-        ["疾病名稱",   cond["disease"],      "臨床分類",   clin_str],
-        ["SNOMED-CT", cond["snomed"],        "發病日期",   _fmt_dt(cond["onset"])],
-        ["確認狀態",   cond["ver_status"],   "通報記錄時間", _fmt_dt(cond["recorded"])],
-    ], col2))
-    story.append(Spacer(1, 1.5 * mm))
-    story.append(_table(
-        [["主訴症狀", eicr["symptoms"] or "（未記載）"]],
-        [38 * mm, W - 38 * mm],
-    ))
+    }.get(cond.get("clinical_status", ""), cond.get("clinical_status", "—"))
+    pdf.row2([("疾病名稱",   cond.get("disease", "—")),
+              ("臨床分類",   clin_str)])
+    pdf.row2([("SNOMED-CT", cond.get("snomed", "—")),
+              ("發病日期",   _fmt_dt(cond.get("onset", "")))])
+    pdf.row2([("確認狀態",   cond.get("ver_status", "—")),
+              ("通報記錄時間", _fmt_dt(cond.get("recorded", "")))])
+    pdf.wide_row("主訴症狀", eicr.get("symptoms", "") or "（未記載）")
 
-    # ── 參、檢驗結果 ──────────────────────────────────────────────────────────
-    story.extend(_section("參、檢驗結果"))
-    obs = eicr["observation"]
-    story.append(_table([
-        ["LOINC 面板", obs["loinc"],       "面板說明",  obs["loinc_display"]],
-        ["檢驗結果",   obs["result"] or "（待確認）",  "判讀", "■ 陽性  □ 陰性  □ 未定"],
-    ], col2))
+    # ── 參、檢驗結果 ───────────────────────────────────────────────────────────
+    pdf.section("參、檢驗結果")
+    obs = eicr.get("observation", {})
+    pdf.row2([("LOINC 面板", obs.get("loinc", "—")),
+              ("面板說明",   obs.get("loinc_display", "—"))])
+    pdf.row2([("檢驗結果", obs.get("result", "（待確認）") or "（待確認）"),
+              ("結果判讀", "■ 陽性  □ 陰性  □ 未定")])
 
-    # ── 肆、就診紀錄 ──────────────────────────────────────────────────────────
-    story.extend(_section("肆、就診紀錄"))
-    enc = eicr["encounter"]
-    enc_status_zh = {"finished": "已完成", "in-progress": "進行中"}.get(enc["status"], enc["status"])
-    story.append(_table([
-        ["就診時間",  _fmt_dt(enc["start"]), "就診類型",  enc["enc_class"]],
-        ["就診狀態",  enc_status_zh,         "通報院所",  hospital_name],
-    ], col2))
+    # ── 肆、就診紀錄 ───────────────────────────────────────────────────────────
+    pdf.section("肆、就診紀錄")
+    enc = eicr.get("encounter", {})
+    enc_zh = {"finished": "已完成", "in-progress": "進行中"}.get(
+        enc.get("status", ""), enc.get("status", "—"))
+    pdf.row2([("就診時間", _fmt_dt(enc.get("start", ""))),
+              ("就診類型", enc.get("enc_class", "—"))])
+    pdf.row2([("就診狀態", enc_zh), ("通報院所", hospital_name)])
 
-    # ── 伍、通報醫療院所 ──────────────────────────────────────────────────────
-    story.extend(_section("伍、通報醫療院所"))
-    org = eicr["organization"]
-    story.append(_table([
-        ["院所名稱", hospital_name,   "通報機構",  org["name"]],
-        ["機構地址", org["address"],  "機構網站",  org["url"]],
-        ["通報醫師", "（請簽章）",     "通報日期",  datetime.now().strftime("%Y/%m/%d")],
-    ], col2))
+    # ── 伍、通報醫療院所 ───────────────────────────────────────────────────────
+    pdf.section("伍、通報醫療院所")
+    org = eicr.get("organization", {})
+    pdf.row2([("院所名稱", hospital_name),
+              ("通報機構", org.get("name", "—"))])
+    pdf.row2([("機構地址", org.get("address", "—")[:40]),
+              ("機構網站", org.get("url", "—"))])
+    pdf.row2([("通報醫師", "（請簽章）"),
+              ("通報日期", datetime.now().strftime("%Y/%m/%d"))])
 
     # ── 簽章欄 ────────────────────────────────────────────────────────────────
-    story.append(Spacer(1, 8 * mm))
-    sign = Table(
-        [[
-            _p("通報醫師簽章：___________________________", size=10),
-            _p("院所主管簽章：___________________________", size=10),
-            _p(f"通報日期：{datetime.now().strftime('%Y/%m/%d')}", size=10),
-        ]],
-        colWidths=[W / 3, W / 3, W / 3],
-    )
-    sign.setStyle(TableStyle([
-        ("BOX",           (0, 0), (-1, -1), 0.8, BLACK),
-        ("GRID",          (0, 0), (-1, -1), 0.5, LGRAY),
-        ("TOPPADDING",    (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 6),
-    ]))
-    story.append(sign)
+    pdf.ln(5)
+    sign_w = W / 3
+    y_sign = pdf.get_y()
+    sign_texts = [
+        "通報醫師簽章：___________________________",
+        "院所主管簽章：___________________________",
+        f"通報日期：{datetime.now().strftime('%Y/%m/%d')}",
+    ]
+    for i, txt in enumerate(sign_texts):
+        pdf._f(10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(pdf.l_margin + i * sign_w, y_sign)
+        pdf.multi_cell(sign_w, 15, txt, border=1, align="L",
+                       new_x="RIGHT", new_y="TOP")
+    pdf.set_xy(pdf.l_margin, y_sign + 15)
 
-    # ── 頁尾 ─────────────────────────────────────────────────────────────────
-    story.append(Spacer(1, 5 * mm))
-    story.append(HRFlowable(width=W, thickness=0.5, color=LGRAY))
-    story.append(Spacer(1, 2 * mm))
-    footer_style = ParagraphStyle(
-        "ft", fontName=FONT, fontSize=7, leading=10,
-        textColor=LGRAY, wordWrap="CJK",
-    )
-    story.append(Paragraph(
-        f"eICR Bundle ID：{eicr['bundle_id']}　文件狀態：{eicr.get('comp_status','').upper()}",
-        footer_style,
-    ))
-    story.append(Paragraph(
+    # ── 頁尾 ──────────────────────────────────────────────────────────────────
+    pdf.ln(4)
+    pdf.hr(0.3)
+    pdf.ln(2)
+    pdf._f(7)
+    pdf.set_text_color(130, 130, 130)
+    for line in [
+        f"eICR Bundle ID：{eicr.get('bundle_id','—')}　文件狀態：{eicr.get('comp_status','').upper()}",
         "本通報單由 MedMorph 自動通報引擎依據 HL7 FHIR R4 標準產生，格式參照衛生福利部傳染病個案通報單。",
-        footer_style,
-    ))
-    story.append(Paragraph(
         "NTU 智慧醫療期末專題 · 第五組 · MedMorph Reference Architecture · 僅供學術展示用途",
-        footer_style,
-    ))
+    ]:
+        pdf.multi_cell(W, 4.5, line, align="L", new_x="LMARGIN", new_y="NEXT")
 
-    doc.build(story)
-    return buf.getvalue()
+    return bytes(pdf.output())
