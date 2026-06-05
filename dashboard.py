@@ -8,7 +8,9 @@
 import json
 import os
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -21,6 +23,7 @@ from pdf_report import generate_eicr_pdf
 # ── 常數 ──────────────────────────────────────────────────────────────────────
 DB_PATH             = os.getenv("DB_PATH", "data/cases.db")
 REFRESH_INTERVAL_MS = 15_000
+TZ_TPE              = ZoneInfo("Asia/Taipei")
 
 COUNTY_COORDS = {
     "台北市": (25.0330, 121.5654), "新北市": (25.0120, 121.4653),
@@ -55,11 +58,30 @@ def load_cases(db_path: str) -> pd.DataFrame:
         df = pd.read_sql_query("SELECT * FROM cases ORDER BY report_date DESC", conn)
     if df.empty:
         return df
-    df["report_date"]   = pd.to_datetime(df["report_date"], utc=True, errors="coerce")
-    df["date"]          = df["report_date"].dt.date
+
+    df["report_date"] = pd.to_datetime(df["report_date"], utc=True, errors="coerce")
+    # 以台北時間計算「今日」日期，避免 UTC 日期跨日誤差
+    df["date"] = df["report_date"].dt.tz_convert("Asia/Taipei").dt.date
     df["symptoms_list"] = df["symptoms"].apply(
         lambda s: json.loads(s) if isinstance(s, str) and s else []
     )
+
+    # 確保新欄位存在（相容舊版 DB）
+    for col in ["hospital_name", "hospital_address", "hospital_lat", "hospital_lon",
+                "home_address", "home_lat", "home_lon"]:
+        if col not in df.columns:
+            df[col] = None
+
+    # 計算年齡
+    today = datetime.now(TZ_TPE).date()
+    def _age(bd):
+        try:
+            bd_d = datetime.strptime(str(bd), "%Y-%m-%d").date()
+            return (today - bd_d).days // 365
+        except Exception:
+            return None
+    df["age"] = df["birthdate"].apply(_age)
+
     return df
 
 
@@ -86,13 +108,19 @@ def parse_eicr(eicr_path: str) -> dict | None:
     condition   = _res(bundle, "Condition")
     observation = _res(bundle, "Observation")
     encounter   = _res(bundle, "Encounter")
-    org         = _res(bundle, "Organization")
     composition = _res(bundle, "Composition")
 
-    cond_c  = (condition.get("code", {}).get("coding") or [{}])[0]
-    obs_c   = (observation.get("code", {}).get("coding") or [{}])[0]
-    obs_vc  = (observation.get("valueCodeableConcept", {}).get("coding") or [{}])[0]
-    org_adr = (org.get("address") or [{}])[0]
+    # 取通報院所（custodian 以外的 Organization）和 CDC
+    orgs = [e["resource"] for e in bundle.get("entry", [])
+            if e.get("resource", {}).get("resourceType") == "Organization"]
+    hosp_org = next((o for o in orgs if o.get("id", "").startswith("org-hosp")), {})
+    cdc_org  = next((o for o in orgs if o.get("id") == "org-tw-cdc"), orgs[0] if orgs else {})
+
+    cond_c = (condition.get("code", {}).get("coding") or [{}])[0]
+    obs_c  = (observation.get("code", {}).get("coding") or [{}])[0]
+    obs_vc = (observation.get("valueCodeableConcept", {}).get("coding") or [{}])[0]
+    cdc_adr = (cdc_org.get("address") or [{}])[0]
+    pat_adr = (patient.get("address") or [{}])[0]
 
     return {
         "bundle_id":   bundle.get("id", ""),
@@ -103,7 +131,9 @@ def parse_eicr(eicr_path: str) -> dict | None:
             "name":      (patient.get("name") or [{}])[0].get("text", "未知"),
             "gender":    patient.get("gender", "unknown"),
             "birthdate": patient.get("birthDate", "未知"),
-            "county":    (patient.get("address") or [{}])[0].get("district", "未知"),
+            "county":    pat_adr.get("city", pat_adr.get("district", "未知")),
+            "district":  pat_adr.get("district", ""),
+            "address":   "、".join(pat_adr.get("line", [])),
             "phone":     next((t["value"] for t in patient.get("telecom", []) if t.get("value")), "未提供"),
         },
         "condition": {
@@ -125,29 +155,33 @@ def parse_eicr(eicr_path: str) -> dict | None:
             "enc_class": encounter.get("class", {}).get("display", ""),
             "status":    encounter.get("status", ""),
         },
+        "hospital": {
+            "name":    hosp_org.get("name", ""),
+            "address": (hosp_org.get("address") or [{}])[0].get("text", ""),
+        },
         "organization": {
-            "name":    org.get("name", ""),
-            "url":     next((t["value"] for t in org.get("telecom", []) if t.get("system") == "url"), ""),
-            "address": "、".join(org_adr.get("line", [])) + org_adr.get("city", ""),
+            "name":    cdc_org.get("name", ""),
+            "url":     next((t["value"] for t in cdc_org.get("telecom", []) if t.get("system") == "url"), ""),
+            "address": "、".join(cdc_adr.get("line", [])) + cdc_adr.get("city", ""),
         },
         "_raw": bundle,
     }
 
 
 def _fmt_dt(iso: str) -> str:
+    """ISO 8601 UTC → Asia/Taipei 格式化顯示"""
     if not iso:
         return "未知"
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y/%m/%d %H:%M")
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.astimezone(TZ_TPE).strftime("%Y/%m/%d %H:%M")
     except Exception:
         return iso
 
 
-# ── eICR 通報單內嵌顯示（取代 @st.dialog，避免 auto-refresh 關閉） ────────────
+# ── eICR 通報單面板 ───────────────────────────────────────────────────────────
 
 def render_eicr_panel(eicr: dict, hospital_name: str):
-    """將 eICR 通報單以 HTML 樣式渲染在頁面內，並提供 PDF 下載"""
-
     def section(title: str):
         st.markdown(
             f"<div style='background:#003F87;color:white;padding:6px 14px;"
@@ -209,7 +243,6 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
 
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
-    # 壹、病患
     section("壹、個案基本資料")
     p = eicr["patient"]
     c1, c2, c3 = st.columns(3)
@@ -217,14 +250,16 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
     with c2: field("性別", GENDER_LABEL.get(p["gender"], p["gender"]))
     with c3: field("出生日期", p["birthdate"])
     c4, c5 = st.columns(2)
-    with c4: field("居住地區", p["county"])
+    with c4: field("居住地區", f"{p['county']} {p.get('district','')}".strip())
     with c5: field("聯絡電話", p["phone"])
+    if p.get("address"):
+        field("住家地址", p["address"])
 
-    # 貳、疾病
     section("貳、疾病及臨床資訊")
     cond = eicr["condition"]
     status_zh = {"suspected": "🟡 疑似（Suspected）",
-                 "confirmed": "🔴 確診（Confirmed）"}.get(cond["clinical_status"], cond["clinical_status"])
+                 "confirmed": "🔴 確診（Confirmed）"}.get(
+        cond["clinical_status"], cond["clinical_status"])
     d1, d2 = st.columns(2)
     with d1:
         field("疾病名稱", cond["disease"])
@@ -233,10 +268,9 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
         field("臨床分類", status_zh)
         field("確認狀態", cond["ver_status"])
     d3, d4 = st.columns(2)
-    with d3: field("發病日期", _fmt_dt(cond["onset"]))
-    with d4: field("通報記錄時間", _fmt_dt(cond["recorded"]))
+    with d3: field("發病（就診）日期", _fmt_dt(cond["onset"]))
+    with d4: field("通報記錄時間",     _fmt_dt(cond["recorded"]))
 
-    # 參、症狀
     section("參、主訴症狀")
     symp = eicr["symptoms"]
     if symp:
@@ -249,7 +283,6 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
     else:
         st.caption("（未記載）")
 
-    # 肆、檢驗
     section("肆、檢驗結果")
     obs = eicr["observation"]
     o1, o2, o3 = st.columns(3)
@@ -257,7 +290,6 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
     with o2: field("面板說明", obs["loinc_display"])
     with o3: field("觀察結果", obs["result"])
 
-    # 伍、就診
     section("伍、就診紀錄")
     enc = eicr["encounter"]
     e1, e2, e3 = st.columns(3)
@@ -265,33 +297,41 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
     with e2: field("就診類型", enc["enc_class"])
     with e3: field("就診狀態", {"finished": "已完成", "in-progress": "進行中"}.get(enc["status"], enc["status"]))
 
-    # 陸、機構
     section("陸、通報醫療院所")
-    org = eicr["organization"]
+    hosp = eicr.get("hospital", {})
+    org  = eicr["organization"]
     g1, g2 = st.columns(2)
     with g1:
-        field("機構名稱", org["name"])
-        field("機構地址", org["address"])
+        field("通報院所", hosp.get("name") or hospital_name)
+        field("院所地址", hosp.get("address", ""))
     with g2:
-        field("通報院所", hospital_name)
+        field("公衛主管機構", org["name"])
         field("機構網站", org["url"])
 
-    # 原始 JSON
     st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
     with st.expander("🔍 原始 eICR Bundle JSON（FHIR R4）"):
         st.code(json.dumps(eicr["_raw"], ensure_ascii=False, indent=2), language="json")
 
 
-
 # ── 圖表函式 ──────────────────────────────────────────────────────────────────
 
-def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部") -> go.Figure:
+def _empty_map(height: int = 460) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        mapbox_style="open-street-map",
+        mapbox_center={"lat": 23.8, "lon": 121.0},
+        mapbox_zoom=6,
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        height=height,
+    )
+    return fig
+
+
+def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部",
+                    height: int = 460) -> go.Figure:
+    """縣市累積泡泡地圖"""
     if df.empty:
-        fig = go.Figure()
-        fig.update_layout(mapbox_style="open-street-map",
-                          mapbox_center={"lat": 23.8, "lon": 121.0},
-                          mapbox_zoom=6, margin={"l": 0, "r": 0, "t": 0, "b": 0}, height=500)
-        return fig
+        return _empty_map(height)
     plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
     grp = plot_df.groupby(["county", "disease"]).size().reset_index(name="count")
     grp["lat"]        = grp["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[0])
@@ -302,10 +342,11 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部") -> go.Figu
     fig = px.scatter_mapbox(
         grp, lat="lat", lon="lon", size="total", color="disease",
         color_discrete_map=DISEASE_COLORS, hover_name="county",
-        hover_data={"disease_zh": True, "count": True, "lat": False, "lon": False, "total": False},
+        hover_data={"disease_zh": True, "count": True,
+                    "lat": False, "lon": False, "total": False},
         labels={"disease": "疾病", "count": "案例數", "disease_zh": "疾病名稱"},
         size_max=55, zoom=6, center={"lat": 23.8, "lon": 121.0},
-        mapbox_style="open-street-map", height=500,
+        mapbox_style="open-street-map", height=height,
     )
     fig.update_layout(
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
@@ -315,16 +356,142 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部") -> go.Figu
     return fig
 
 
+def make_hospital_map(df: pd.DataFrame, disease_filter: str = "全部",
+                      height: int = 460) -> go.Figure:
+    """通報醫療院所分布地圖"""
+    if df.empty:
+        return _empty_map(height)
+    plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
+    hdf = plot_df.dropna(subset=["hospital_lat", "hospital_lon"])
+    hdf = hdf[(hdf["hospital_lat"] != 0) & (hdf["hospital_name"] != "")]
+    if hdf.empty:
+        return _empty_map(height)
+
+    grp = (hdf.groupby(["hospital_name", "hospital_lat", "hospital_lon", "disease"])
+             .size().reset_index(name="count"))
+    tot = grp.groupby("hospital_name")["count"].sum().reset_index(name="total")
+    grp = grp.merge(tot, on="hospital_name")
+    grp["disease_zh"] = grp["disease"].map(DISEASE_ZH)
+
+    fig = px.scatter_mapbox(
+        grp, lat="hospital_lat", lon="hospital_lon",
+        size="total", color="disease",
+        color_discrete_map=DISEASE_COLORS,
+        hover_name="hospital_name",
+        hover_data={"disease_zh": True, "count": True,
+                    "hospital_lat": False, "hospital_lon": False, "total": False},
+        labels={"disease": "疾病", "count": "案例數", "disease_zh": "疾病"},
+        size_max=50, zoom=6, center={"lat": 23.8, "lon": 121.0},
+        mapbox_style="open-street-map", height=height,
+    )
+    fig.update_layout(
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        title=dict(text="🏥 通報醫療院所（泡泡大小 = 通報數）", font_size=13, y=0.97),
+        legend=dict(title="疾病類型", orientation="h", yanchor="bottom", y=0.01,
+                    xanchor="right", x=0.99, bgcolor="rgba(255,255,255,0.85)"),
+    )
+    return fig
+
+
+def make_temporal_map(df: pd.DataFrame, disease_filter: str = "全部",
+                      height: int = 460) -> go.Figure:
+    """疾病時間擴散趨勢圖 — 病患居住地，依通報日期新舊著色（近期色深）"""
+    if df.empty:
+        return _empty_map(height)
+    plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
+    if plot_df.empty:
+        return _empty_map(height)
+
+    today = datetime.now(TZ_TPE).date()
+    plot_df = plot_df.copy()
+
+    # 優先用 home_lat/lon，否則退回縣市中心
+    def _lat(row):
+        v = row.get("home_lat")
+        if v and pd.notna(v) and float(v) != 0:
+            return float(v)
+        return COUNTY_COORDS.get(row["county"], (23.8, 121.0))[0]
+
+    def _lon(row):
+        v = row.get("home_lon")
+        if v and pd.notna(v) and float(v) != 0:
+            return float(v)
+        return COUNTY_COORDS.get(row["county"], (23.8, 121.0))[1]
+
+    plot_df["_lat"] = plot_df.apply(_lat, axis=1)
+    plot_df["_lon"] = plot_df.apply(_lon, axis=1)
+    plot_df["days_ago"] = plot_df["date"].apply(
+        lambda d: (today - d).days if pd.notna(d) else 999
+    )
+
+    # 時間分層：(標籤, 最小天, 最大天, 透明度, 點大小)
+    BUCKETS = [
+        ("近 3 天",  0,   3,  1.00, 10),
+        ("4–7 天",   4,   7,  0.65,  8),
+        ("8–14 天",  8,  14,  0.35,  7),
+        ("15–30 天", 15, 30,  0.18,  6),
+        ("30+ 天",   31, 999, 0.09,  5),
+    ]
+
+    fig = go.Figure()
+    for label, d_min, d_max, opacity, sz in BUCKETS:
+        mask = (plot_df["days_ago"] >= d_min) & (plot_df["days_ago"] <= d_max)
+        sub  = plot_df[mask]
+        if sub.empty:
+            continue
+        for disease in sub["disease"].unique():
+            dsub = sub[sub["disease"] == disease]
+            base_color = DISEASE_COLORS.get(disease, "#888888")
+            date_strs  = [
+                r.strftime("%m/%d") if pd.notna(r) else ""
+                for r in dsub["report_date"]
+            ]
+            fig.add_trace(go.Scattermapbox(
+                lat=dsub["_lat"].tolist(),
+                lon=dsub["_lon"].tolist(),
+                mode="markers",
+                marker=dict(size=sz, color=base_color, opacity=opacity),
+                name=f"{DISEASE_ZH.get(disease, disease)} · {label}",
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>"
+                    f"疾病：{DISEASE_ZH.get(disease, disease)}<br>"
+                    "縣市：%{customdata[1]}<br>"
+                    "通報日：%{customdata[2]}<extra></extra>"
+                ),
+                customdata=list(zip(
+                    dsub["patient_name"].tolist(),
+                    dsub["county"].tolist(),
+                    date_strs,
+                )),
+                legendgroup=disease,
+            ))
+
+    fig.update_layout(
+        mapbox_style="open-street-map",
+        mapbox_center={"lat": 23.8, "lon": 121.0},
+        mapbox_zoom=6,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        height=height,
+        title=dict(text="🕐 疾病擴散時間軸（顏色深 = 越近期）", font_size=13, y=0.97),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
+            bgcolor="rgba(255,255,255,0.85)", font_size=10,
+        ),
+    )
+    return fig
+
+
 def make_trend_figure(df: pd.DataFrame, days: int = 14,
                       disease_filter: str = "全部") -> go.Figure:
     if df.empty or "date" not in df.columns:
         fig = go.Figure()
-        fig.update_layout(title="每日新增案例趨勢（無資料）", height=360,
+        fig.update_layout(title="每日新增案例趨勢（無資料）", height=320,
                           plot_bgcolor="rgba(0,0,0,0)")
         return fig
-    cutoff    = (datetime.now() - timedelta(days=days)).date()
-    recent    = df[df["date"] >= cutoff]
-    all_dates = pd.date_range(start=cutoff, end=datetime.now().date(), freq="D").date
+    today   = datetime.now(TZ_TPE).date()
+    cutoff  = (datetime.now(TZ_TPE) - timedelta(days=days)).date()
+    recent  = df[df["date"] >= cutoff]
+    all_dates = pd.date_range(start=cutoff, end=today, freq="D").date
     diseases  = [disease_filter] if disease_filter != "全部" else list(DISEASE_ZH)
     fig = go.Figure()
     for d in diseases:
@@ -342,7 +509,7 @@ def make_trend_figure(df: pd.DataFrame, days: int = 14,
         xaxis_title="日期", yaxis_title="新增案例數",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        height=360, hovermode="x unified", margin=dict(l=50, r=20, t=50, b=40),
+        height=320, hovermode="x unified", margin=dict(l=50, r=20, t=50, b=40),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)", rangemode="tozero")
@@ -366,13 +533,66 @@ def make_county_bar(df: pd.DataFrame) -> go.Figure:
             hovertemplate="%{y}：%{x} 例<extra></extra>",
         ))
     fig.update_layout(
-        barmode="stack", title=dict(text="各縣市案例分布", font_size=14),
-        xaxis_title="案例數", height=max(400, len(ordered) * 22 + 80),
+        barmode="stack",
+        title=dict(text="各縣市案例分布", font_size=14),
+        xaxis_title="案例數",
+        height=max(380, len(ordered) * 22 + 80),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=80, r=20, t=50, b=40),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    return fig
+
+
+def make_age_chart(df: pd.DataFrame) -> go.Figure:
+    """各疾病年齡分布 Box Plot"""
+    if df.empty or "age" not in df.columns:
+        return go.Figure()
+    fig = go.Figure()
+    for d in list(DISEASE_ZH):
+        ages = df[df["disease"] == d]["age"].dropna()
+        if ages.empty:
+            continue
+        fig.add_trace(go.Box(
+            y=ages, name=f"{DISEASE_EMOJI[d]} {DISEASE_ZH[d]}",
+            marker_color=DISEASE_COLORS[d],
+            boxmean="sd",
+            hovertemplate="年齡：%{y} 歲<extra></extra>",
+        ))
+    fig.update_layout(
+        title=dict(text="各疾病年齡分布", font_size=14),
+        yaxis_title="年齡（歲）",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        height=300, margin=dict(l=50, r=20, t=50, b=40),
+        showlegend=False,
+    )
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
+    return fig
+
+
+def make_symptom_chart(df: pd.DataFrame, top_n: int = 12) -> go.Figure:
+    """最常見症狀排行"""
+    if df.empty or "symptoms_list" not in df.columns:
+        return go.Figure()
+    all_syms = [s for row in df["symptoms_list"] for s in row]
+    if not all_syms:
+        return go.Figure()
+    counts = Counter(all_syms).most_common(top_n)
+    labels = [c[0] for c in reversed(counts)]
+    values = [c[1] for c in reversed(counts)]
+    fig = go.Figure(go.Bar(
+        x=values, y=labels, orientation="h",
+        marker_color="#4A9EFF",
+        hovertemplate="%{y}：%{x} 次<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text=f"主訴症狀 Top {top_n}", font_size=14),
+        xaxis_title="出現次數",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        height=300, margin=dict(l=90, r=20, t=50, b=40),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
     return fig
 
 
@@ -387,14 +607,12 @@ def main():
     )
 
     ss = st.session_state
-
-    # ── Auto-refresh：一律執行，session_state 保持 eICR 選取不會消失 ─────────
     is_viewing = "eicr_case" in ss
     st_autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
 
     st.markdown("""
     <style>
-    /* ═══ 全頁固定於 viewport，禁止整頁捲動 ═══ */
+    /* ═══ 全頁固定於 viewport ═══ */
     html { overflow-y: hidden !important; }
     .main .block-container {
         padding-top: 0.6rem !important;
@@ -403,7 +621,7 @@ def main():
         overflow: hidden !important;
     }
 
-    /* ═══ KPI 卡片（緊湊版） ═══ */
+    /* ═══ KPI 卡片 ═══ */
     .metric-card {
         border-radius:10px; padding:10px 14px; color:white;
         text-align:center; box-shadow:0 3px 8px rgba(0,0,0,0.1);
@@ -415,48 +633,31 @@ def main():
 
     /* ═══ Tab 按鈕 ═══ */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        background: transparent;
+        gap: 6px; background: transparent;
         border-bottom: 2px solid #E0E6F0;
-        padding-bottom: 0;
-        margin-bottom: 0;
+        padding-bottom: 0; margin-bottom: 0;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 48px;
-        min-width: 150px;
-        padding: 0 20px;
-        background: #F0F4FA;
-        border-radius: 10px 10px 0 0;
-        border: 1.5px solid #D0DBF0;
-        border-bottom: none;
-        font-size: 1.0rem !important;
-        font-weight: 600 !important;
-        color: #4A6FA5 !important;
-        transition: background 0.2s, color 0.2s;
+        height: 44px; min-width: 130px; padding: 0 16px;
+        background: #F0F4FA; border-radius: 10px 10px 0 0;
+        border: 1.5px solid #D0DBF0; border-bottom: none;
+        font-size: 0.95rem !important; font-weight: 600 !important;
+        color: #4A6FA5 !important; transition: background 0.2s, color 0.2s;
     }
     .stTabs [data-baseweb="tab"]:hover {
-        background: #E3EBF8;
-        color: #003F87 !important;
+        background: #E3EBF8; color: #003F87 !important;
     }
     .stTabs [aria-selected="true"] {
-        background: white !important;
-        color: #003F87 !important;
+        background: white !important; color: #003F87 !important;
         border-color: #003F87 #D0DBF0 white !important;
         border-bottom: 2px solid white !important;
         box-shadow: 0 -2px 8px rgba(0,63,135,0.08);
     }
-    /* Tab 內容區不產生自身捲動，由內部 container 負責 */
     .stTabs [data-baseweb="tab-panel"] {
-        padding-top: 10px !important;
-        overflow: hidden !important;
+        padding-top: 8px !important; overflow: hidden !important;
     }
 
-    /* ═══ 內部滾動容器：移除預設灰框，顯示自訂捲軸 ═══ */
-    [data-testid="stVerticalBlockBorderWrapper"] > div {
-        border-radius: 8px;
-    }
-
-    /* ═══ 通報單按鈕：emoji 水平置中 ═══ */
+    /* ═══ 通報單按鈕：emoji 置中 ═══ */
     [data-testid="stButton"] > button {
         display: flex !important;
         align-items: center !important;
@@ -466,14 +667,13 @@ def main():
     }
     </style>""", unsafe_allow_html=True)
 
-    # 從 session_state 讀取篩選設定
-    db_path_val      = ss.get("cfg_db_path",        DB_PATH)
-    disease_val      = ss.get("cfg_disease_filter",  "全部")
-    status_val       = ss.get("cfg_status_filter",   "全部")
-    days_val         = ss.get("cfg_days_range",       14)
-    hospital_name    = ss.get("cfg_hospital",        "測試醫院")
+    db_path_val   = ss.get("cfg_db_path",        DB_PATH)
+    disease_val   = ss.get("cfg_disease_filter",  "全部")
+    status_val    = ss.get("cfg_status_filter",   "全部")
+    days_val      = ss.get("cfg_days_range",       35)
+    hospital_name = ss.get("cfg_hospital",        "測試醫院")
 
-    # ── 頂部標題（單行緊湊版） ────────────────────────────────────────────────────
+    # ── 頂部標題 ──────────────────────────────────────────────────────────────
     h_left, h_mid, h_right = st.columns([5, 2, 1])
     with h_left:
         st.markdown(
@@ -483,10 +683,11 @@ def main():
             unsafe_allow_html=True,
         )
     with h_mid:
+        now_tpe = datetime.now(TZ_TPE)
         st.markdown(
             f"<div style='text-align:right;padding-top:4px;"
             f"font-size:0.82rem;color:#999'>⏱ 每 {REFRESH_INTERVAL_MS//1000}s 刷新　"
-            f"{datetime.now().strftime('%H:%M:%S')}</div>",
+            f"{now_tpe.strftime('%H:%M:%S')} (TPE)</div>",
             unsafe_allow_html=True,
         )
     with h_right:
@@ -494,7 +695,6 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
-    # 載入資料
     df_all = load_cases(db_path_val)
     df = df_all.copy()
     if disease_val != "全部":
@@ -502,11 +702,14 @@ def main():
     if status_val != "全部":
         df = df[df["status"] == status_val]
 
-    # ── KPI 卡片（常駐） ──────────────────────────────────────────────────────
-    def cnt(d): return 0 if df_all.empty else len(df_all[df_all["disease"] == d])
+    # ── KPI 卡片 ──────────────────────────────────────────────────────────────
+    today_tpe = datetime.now(TZ_TPE).date()
+
+    def cnt(d):  return 0 if df_all.empty else len(df_all[df_all["disease"] == d])
     def tc(d):
-        if df_all.empty or "date" not in df_all.columns: return 0
-        return len(df_all[(df_all["disease"] == d) & (df_all["date"] == datetime.now().date())])
+        if df_all.empty or "date" not in df_all.columns:
+            return 0
+        return len(df_all[(df_all["disease"] == d) & (df_all["date"] == today_tpe)])
 
     total_all = len(df_all)
     today_all = sum(tc(d) for d in DISEASE_ZH)
@@ -532,49 +735,80 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    # 去掉 <br> 間距，改為一小段 margin
     st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
     if df_all.empty:
         st.warning("⚠️ 尚無資料。請先執行：\n```bash\nuv run python seed_data.py\n```")
         return
 
-    # ── Tabs（所有內容都在固定高度 container 內捲動） ─────────────────────────
-    # 根據視窗高度估算可用高度：100vh - 58(bar) - 55(title) - 90(KPI) - 55(tabs) ≈ 560px
-    TAB_H = 560   # tab 內容區高度（像素）
-    LIST_H = TAB_H - 2   # 清單/面板高度（含標頭略小）
+    # ── Tabs ──────────────────────────────────────────────────────────────────
+    TAB_H  = 560
+    LIST_H = TAB_H - 2
 
-    tab_map, tab_trend, tab_cases, tab_settings = st.tabs([
-        "🗺️ 地理分布", "📈 趨勢分析", "📋 案例明細 & 通報單", "⚙️ 設定",
+    tab_map, tab_trend, tab_cases, tab_demo, tab_settings = st.tabs([
+        "🗺️ 地理分布", "📈 趨勢分析", "📋 案例明細 & 通報單",
+        "📊 人口統計", "⚙️ 設定",
     ])
 
     # ── Tab 1：地理分布 ─────────────────────────────────────────────────────────
     with tab_map:
         with st.container(height=TAB_H, border=False):
-            mc, bc = st.columns([3, 2])
-            with mc:
-                st.plotly_chart(
-                    make_map_figure(df, disease_val),
-                    use_container_width=True, config={"scrollZoom": True},
+            map_mode = st.radio(
+                "地圖類型",
+                ["🗺️ 縣市累積分布", "🏥 通報院所熱點", "🏠 病患居住地（時間擴散）"],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+            MAP_H = 470   # 扣掉 radio 按鈕列高度
+
+            if map_mode == "🗺️ 縣市累積分布":
+                mc, bc = st.columns([3, 2])
+                with mc:
+                    st.plotly_chart(make_map_figure(df, disease_val, MAP_H),
+                                    use_container_width=True, config={"scrollZoom": True})
+                with bc:
+                    st.plotly_chart(make_county_bar(df), use_container_width=True)
+
+            elif map_mode == "🏥 通報院所熱點":
+                mc, ic = st.columns([3, 2])
+                with mc:
+                    st.plotly_chart(make_hospital_map(df, disease_val, MAP_H),
+                                    use_container_width=True, config={"scrollZoom": True})
+                with ic:
+                    st.markdown("**前 10 通報院所**")
+                    if "hospital_name" in df.columns:
+                        top_h = (df[df["hospital_name"].notna() & (df["hospital_name"] != "")]
+                                 .groupby("hospital_name").size()
+                                 .sort_values(ascending=False).head(10)
+                                 .reset_index())
+                        top_h.columns = ["院所", "案例數"]
+                        st.dataframe(top_h, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("尚無院所資料，請重新 seed 或等候引擎更新")
+
+            else:  # 時間擴散
+                st.plotly_chart(make_temporal_map(df, disease_val, MAP_H),
+                                use_container_width=True, config={"scrollZoom": True})
+                st.caption(
+                    "📍 點位為病患居住地 | 顏色深淺代表通報時間遠近 | "
+                    "可放大地圖觀察疾病擴散軌跡"
                 )
-            with bc:
-                st.plotly_chart(make_county_bar(df), use_container_width=True)
 
     # ── Tab 2：趨勢分析 ─────────────────────────────────────────────────────────
     with tab_trend:
         with st.container(height=TAB_H, border=False):
-            st.plotly_chart(
-                make_trend_figure(df_all, days_val, disease_val),
-                use_container_width=True,
-            )
+            st.plotly_chart(make_trend_figure(df_all, days_val, disease_val),
+                            use_container_width=True)
             if "date" in df_all.columns:
-                cutoff = (datetime.now() - timedelta(days=days_val)).date()
+                cutoff = (datetime.now(TZ_TPE) - timedelta(days=days_val)).date()
                 summary = (
                     df_all[df_all["date"] >= cutoff]
                     .groupby("disease")
-                    .agg(案例數=("id", "count"),
-                         疑似=("status", lambda x: (x == "suspected").sum()),
-                         確診=("status", lambda x: (x == "confirmed").sum()))
+                    .agg(
+                        案例數=("id", "count"),
+                        疑似=("status", lambda x: (x == "suspected").sum()),
+                        確診=("status", lambda x: (x == "confirmed").sum()),
+                    )
                     .reset_index()
                 )
                 summary["disease"] = summary["disease"].map(
@@ -583,22 +817,19 @@ def main():
                 summary.columns = ["疾病", f"近{days_val}天案例", "　疑似", "　確診"]
                 st.dataframe(summary, use_container_width=True, hide_index=True)
 
-    # ── Tab 3：案例明細 & 通報單（左右分割，各自內捲） ───────────────────────────
+    # ── Tab 3：案例明細 & 通報單 ─────────────────────────────────────────────────
     with tab_cases:
         if df.empty:
             st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件。")
         else:
             list_col, view_col = st.columns([0.40, 0.60], gap="small")
 
-            # ── 左：固定高度捲動清單 ─────────────────────────────────────────
             with list_col:
                 st.caption(
                     f"共 {len(df)} 筆（最近 50 筆）｜點 📋 查閱通報單",
                     help="點選任一列的 📋 按鈕，右側即顯示 eICR 通報單內容",
                 )
-                # 捲動容器
                 with st.container(height=LIST_H, border=True):
-                    # 表頭（固定在捲動容器內最頂部）
                     COLS = [0.28, 1.55, 1.45, 1.15, 1.05, 0.72]
                     hcols = st.columns(COLS)
                     for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
@@ -607,25 +838,20 @@ def main():
                             f"<b style='font-size:0.8rem;color:#555;{extra}'>{lbl}</b>",
                             unsafe_allow_html=True,
                         )
-                    st.markdown(
-                        "<hr style='margin:2px 0;border-color:#ddd'>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("<hr style='margin:2px 0;border-color:#ddd'>",
+                                unsafe_allow_html=True)
 
-                    view_df  = df.head(50).reset_index(drop=True)
-                    sel_idx  = ss.get("eicr_index", -1)
+                    view_df = df.head(50).reset_index(drop=True)
+                    sel_idx = ss.get("eicr_index", -1)
 
                     for i, row in view_df.iterrows():
                         is_sel = (i == sel_idx)
-                        # 選取指示：左側藍線 + 顯式文字色，避免 dark mode 亮底色蓋掉文字
-                        hl = ("border-left:3px solid #4A9EFF;padding-left:4px;"
-                              "color:#4A9EFF !important;" if is_sel else "")
+                        hl     = ("border-left:3px solid #4A9EFF;padding-left:4px;"
+                                  "color:#4A9EFF !important;" if is_sel else "")
                         rcols  = st.columns(COLS)
                         d_zh   = (f"{DISEASE_EMOJI.get(row['disease'],'')} "
                                   f"{DISEASE_ZH.get(row['disease'], row['disease'])}")
                         s_zh   = STATUS_LABEL.get(row["status"], row["status"])
-                        dt_str = (row["report_date"].strftime("%m/%d")
-                                  if pd.notna(row["report_date"]) else "")
 
                         rcols[0].markdown(
                             f"<span style='color:#bbb;font-size:0.78rem'>{i+1}</span>",
@@ -649,7 +875,6 @@ def main():
                             f"<span style='font-size:0.82rem'>{s_zh}</span>",
                             unsafe_allow_html=True,
                         )
-                        # 📋 按鈕：最後一欄夠寬，不會被擠
                         if rcols[5].button(
                             "📋", key=f"v_{i}",
                             help=f"查閱 {row['patient_name']} 的 eICR 通報單",
@@ -660,10 +885,8 @@ def main():
                             ss["eicr_index"] = i
                             st.rerun()
 
-            # ── 右：eICR 通報單固定高度捲動面板 ─────────────────────────────
             with view_col:
                 if not is_viewing:
-                    # 佔位提示，高度與左欄對齊
                     st.markdown(
                         f"<div style='height:{LIST_H}px;display:flex;"
                         f"align-items:center;justify-content:center;"
@@ -677,13 +900,11 @@ def main():
                     sel_d = DISEASE_ZH.get(sel["disease"], sel["disease"])
                     sel_s = STATUS_LABEL.get(sel["status"], sel["status"])
 
-                    # 標題列（捲動容器外，固定顯示）
                     t_col, c_col = st.columns([5, 1])
                     with t_col:
                         st.markdown(
                             f"**{DISEASE_EMOJI.get(sel['disease'],'')} "
-                            f"{sel['patient_name']}**　"
-                            f"{sel_d}　{sel_s}　{sel['county']}"
+                            f"{sel['patient_name']}**　{sel_d}　{sel_s}　{sel['county']}"
                         )
                     with c_col:
                         if st.button("✕ 關閉", key="close_eicr", use_container_width=True):
@@ -691,8 +912,7 @@ def main():
                             ss.pop("eicr_index", None)
                             st.rerun()
 
-                    # 通報單本體（固定高度，可在內部捲動）
-                    panel_h = LIST_H - 42   # 扣掉標題列高度
+                    panel_h = LIST_H - 42
                     with st.container(height=panel_h, border=True):
                         eicr = parse_eicr(sel.get("eicr_path", ""))
                         if eicr is None:
@@ -700,14 +920,64 @@ def main():
                         else:
                             render_eicr_panel(eicr, hospital_name=hospital_name)
 
-    # ── Tab 4：設定 ─────────────────────────────────────────────────────────────
+    # ── Tab 4：人口統計 ─────────────────────────────────────────────────────────
+    with tab_demo:
+        with st.container(height=TAB_H, border=False):
+            d1c, d2c = st.columns(2)
+            with d1c:
+                st.plotly_chart(make_age_chart(df_all), use_container_width=True)
+
+                # 性別分布
+                if not df_all.empty and "gender" in df_all.columns:
+                    gender_counts = df_all["gender"].map(GENDER_LABEL).value_counts()
+                    fig_g = go.Figure(go.Bar(
+                        x=gender_counts.index.tolist(),
+                        y=gender_counts.values.tolist(),
+                        marker_color=["#4A9EFF", "#F06292", "#90A4AE"],
+                        hovertemplate="%{x}：%{y} 例<extra></extra>",
+                    ))
+                    fig_g.update_layout(
+                        title=dict(text="性別分布", font_size=14),
+                        yaxis_title="案例數",
+                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        height=200, margin=dict(l=50, r=20, t=40, b=30),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(fig_g, use_container_width=True)
+
+            with d2c:
+                st.plotly_chart(make_symptom_chart(df_all), use_container_width=True)
+
+                # 疑似 vs 確診比率
+                if not df_all.empty and "status" in df_all.columns:
+                    st.markdown("**疾病確診率**")
+                    stat_tbl = (
+                        df_all.groupby(["disease", "status"])
+                        .size().unstack(fill_value=0)
+                        .reset_index()
+                    )
+                    for col in ["suspected", "confirmed"]:
+                        if col not in stat_tbl.columns:
+                            stat_tbl[col] = 0
+                    stat_tbl["確診率"] = (
+                        stat_tbl["confirmed"] /
+                        (stat_tbl["suspected"] + stat_tbl["confirmed"]) * 100
+                    ).round(1).astype(str) + "%"
+                    stat_tbl["disease"] = stat_tbl["disease"].map(
+                        lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
+                    )
+                    stat_tbl = stat_tbl.rename(columns={
+                        "disease": "疾病", "suspected": "疑似", "confirmed": "確診"
+                    })[["疾病", "疑似", "確診", "確診率"]]
+                    st.dataframe(stat_tbl, use_container_width=True, hide_index=True)
+
+    # ── Tab 5：設定 ─────────────────────────────────────────────────────────────
     with tab_settings:
         with st.container(height=TAB_H, border=False):
             s1, s2 = st.columns(2)
             with s1:
                 st.markdown("#### 🏥 通報院所")
-                new_hospital = st.text_input(
-                    "醫院名稱（顯示於通報單與 PDF）", value=hospital_name)
+                new_hospital = st.text_input("醫院名稱（顯示於通報單與 PDF）", value=hospital_name)
                 st.markdown("#### 🗄️ 資料來源")
                 new_db = st.text_input("SQLite 資料庫路徑", value=db_path_val)
                 st.markdown("#### 🔍 篩選條件")
@@ -725,7 +995,7 @@ def main():
                         "全部": "全部", "suspected": "🟡 疑似", "confirmed": "🔴 確診"
                     }.get(x, x),
                 )
-                new_days = st.slider("趨勢圖天數範圍", 7, 60, days_val, 7)
+                new_days = st.slider("趨勢圖天數範圍", 7, 365, days_val, 1)
                 if st.button("✅ 套用設定", type="primary", use_container_width=True):
                     ss["cfg_hospital"]       = new_hospital
                     ss["cfg_db_path"]        = new_db
@@ -742,15 +1012,18 @@ def main():
                 st.markdown(f"- **通報院所**：{hospital_name}")
                 st.markdown(f"- **總案例數**：{total_all} 筆（今日 +{today_all}）")
                 st.markdown(f"- **自動刷新**：每 {REFRESH_INTERVAL_MS//1000} 秒")
+                st.markdown(f"- **時區**：Asia/Taipei（UTC+8）")
                 st.markdown("- **標準**：FHIR R4 · MedMorph · HL7 eICR")
                 st.markdown("---")
                 st.markdown("#### 📌 使用說明")
                 st.markdown(
-                    "1. **案例明細** Tab → 找到想查閱的案例\n"
-                    "2. 點按最右側 **📋** 按鈕\n"
-                    "3. 右側面板即時顯示 eICR 通報單（可在面板內捲動）\n"
-                    "4. 點「**📄 下載 PDF 通報單**」輸出正式格式\n"
-                    "5. 點「**✕ 關閉**」返回清單模式\n\n"
+                    "1. **地理分布** Tab → 切換三種地圖模式\n"
+                    "   - 縣市累積：縣市層級泡泡圖\n"
+                    "   - 通報院所：點出高通報量院所\n"
+                    "   - 時間擴散：顏色深淺代表通報新舊\n"
+                    "2. **趨勢分析** Tab → 每日新增折線圖\n"
+                    "3. **案例明細** Tab → 點 📋 查閱 eICR 通報單\n"
+                    "4. **人口統計** Tab → 年齡分布、症狀排行\n\n"
                     "| 疾病 | SNOMED-CT | LOINC |\n"
                     "|------|-----------|-------|\n"
                     "| COVID-19 | 840539006 | 94531-1 |\n"

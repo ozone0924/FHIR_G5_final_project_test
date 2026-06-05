@@ -37,16 +37,14 @@ DISEASE_CODES = {
     },
 }
 
-# ── 臨床狀態代碼 ───────────────────────────────────────────────────────────────
 CLINICAL_STATUS_CODES = {
     "suspected": "provisional",
     "confirmed": "confirmed",
-    "active": "active",
+    "active":    "active",
 }
 
 
 def _now_iso() -> str:
-    """回傳現在時間的 ISO 8601 字串（UTC）"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -61,39 +59,45 @@ def generate_eicr(patient_data: dict) -> dict:
     Parameters
     ----------
     patient_data : dict
-        必要欄位：
-            id          (str)  病患唯一識別碼
-            name        (str)  姓名
-            birthDate   (str)  生日 YYYY-MM-DD
-            gender      (str)  male / female / unknown
-            disease     (str)  COVID-19 / Dengue / Influenza
-            county      (str)  縣市（台北市、新北市…）
-            status      (str)  suspected / confirmed
+        必要欄位：id, name, birthDate, gender, disease, county, status
         選填欄位：
-            encounter_date (str)  就診時間 ISO 8601，預設為現在
+            encounter_date (str)  就診時間 ISO 8601（預設：現在）
+            report_date    (str)  通報時間 ISO 8601（預設：encounter_date）
             symptoms       (list) 症狀描述清單
             phone          (str)  聯絡電話
+            hospital_name  (str)  通報院所名稱
+            hospital_address (str) 通報院所地址
+            home_address   (str)  病患住家地址
+            home_district  (str)  病患住家區域
 
     Returns
     -------
-    dict
-        FHIR R4 Bundle (type=document) 字典，可直接 json.dumps() 輸出
+    dict  FHIR R4 Bundle (type=document)
     """
-    pid = patient_data.get("id", _new_uuid())
-    disease = patient_data.get("disease", "COVID-19")
-    code_info = DISEASE_CODES.get(disease, DISEASE_CODES["COVID-19"])
-    status_raw = patient_data.get("status", "suspected")
-    encounter_dt = patient_data.get("encounter_date", _now_iso())
-    symptoms = patient_data.get("symptoms", ["發燒", "咳嗽"])
+    pid          = patient_data.get("id", _new_uuid())
+    disease      = patient_data.get("disease", "COVID-19")
+    code_info    = DISEASE_CODES.get(disease, DISEASE_CODES["COVID-19"])
+    status_raw   = patient_data.get("status", "suspected")
+    encounter_dt = patient_data.get("encounter_date") or _now_iso()
+    # report_date = when the report was filed (after encounter); default = encounter_dt
+    report_dt    = patient_data.get("report_date") or encounter_dt
+    symptoms     = patient_data.get("symptoms", ["發燒", "咳嗽"])
     symptoms_text = "、".join(symptoms) if symptoms else "未記載"
 
-    # 各資源 ID
-    bundle_id = _new_uuid()
-    composition_id = _new_uuid()
-    condition_id = _new_uuid()
-    observation_id = _new_uuid()
-    encounter_id = _new_uuid()
-    org_id = "org-tw-cdc"
+    hospital_name    = patient_data.get("hospital_name", "通報醫院")
+    hospital_address = patient_data.get("hospital_address", "")
+    home_address     = patient_data.get("home_address", "")
+    home_district    = patient_data.get("home_district", "")
+    county           = patient_data.get("county", "台北市")
+
+    # 資源 ID
+    bundle_id       = _new_uuid()
+    composition_id  = _new_uuid()
+    condition_id    = _new_uuid()
+    observation_id  = _new_uuid()
+    encounter_id    = _new_uuid()
+    hospital_org_id = f"org-hosp-{uuid.uuid4().hex[:6]}"
+    cdc_org_id      = "org-tw-cdc"
 
     bundle = {
         "resourceType": "Bundle",
@@ -102,12 +106,12 @@ def generate_eicr(patient_data: dict) -> dict:
             "profile": [
                 "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-document-bundle"
             ],
-            "lastUpdated": _now_iso(),
+            "lastUpdated": report_dt,
         },
         "type": "document",
-        "timestamp": _now_iso(),
+        "timestamp": report_dt,
         "entry": [
-            # ── 1. Composition（eICR 主文件頭） ────────────────────────────────
+            # ── 1. Composition ────────────────────────────────────────────────
             {
                 "fullUrl": f"urn:uuid:{composition_id}",
                 "resource": {
@@ -120,31 +124,26 @@ def generate_eicr(patient_data: dict) -> dict:
                     },
                     "status": "preliminary",
                     "type": {
-                        "coding": [
-                            {
-                                "system": "http://loinc.org",
-                                "code": "55751-2",
-                                "display": "Public health case report - PHRI",
-                            }
-                        ]
+                        "coding": [{
+                            "system": "http://loinc.org",
+                            "code": "55751-2",
+                            "display": "Public health case report - PHRI",
+                        }]
                     },
-                    "subject": {"reference": f"Patient/{pid}"},
-                    "encounter": {"reference": f"Encounter/{encounter_id}"},
-                    "date": encounter_dt,
-                    "author": [{"reference": f"Organization/{org_id}"}],
-                    "title": f"eICR - {disease} 疑似病例通報",
+                    "subject":    {"reference": f"Patient/{pid}"},
+                    "encounter":  {"reference": f"Encounter/{encounter_id}"},
+                    "date":       report_dt,
+                    "author":     [{"reference": f"Organization/{hospital_org_id}"}],
+                    "custodian":  {"reference": f"Organization/{cdc_org_id}"},
+                    "title":      f"eICR - {disease} 疑似病例通報",
                     "section": [
                         {
                             "title": "Chief Complaint",
-                            "code": {
-                                "coding": [
-                                    {
-                                        "system": "http://loinc.org",
-                                        "code": "10154-3",
-                                        "display": "Chief complaint Narrative",
-                                    }
-                                ]
-                            },
+                            "code": {"coding": [{
+                                "system": "http://loinc.org",
+                                "code": "10154-3",
+                                "display": "Chief complaint Narrative",
+                            }]},
                             "text": {
                                 "status": "generated",
                                 "div": f"<div xmlns='http://www.w3.org/1999/xhtml'>主訴：{symptoms_text}</div>",
@@ -152,28 +151,20 @@ def generate_eicr(patient_data: dict) -> dict:
                         },
                         {
                             "title": "Reportable Conditions",
-                            "code": {
-                                "coding": [
-                                    {
-                                        "system": "http://loinc.org",
-                                        "code": "55752-0",
-                                        "display": "Reportable condition",
-                                    }
-                                ]
-                            },
+                            "code": {"coding": [{
+                                "system": "http://loinc.org",
+                                "code": "55752-0",
+                                "display": "Reportable condition",
+                            }]},
                             "entry": [{"reference": f"Condition/{condition_id}"}],
                         },
                         {
                             "title": "Results",
-                            "code": {
-                                "coding": [
-                                    {
-                                        "system": "http://loinc.org",
-                                        "code": "30954-2",
-                                        "display": "Relevant diagnostic tests/laboratory data Narrative",
-                                    }
-                                ]
-                            },
+                            "code": {"coding": [{
+                                "system": "http://loinc.org",
+                                "code": "30954-2",
+                                "display": "Relevant diagnostic tests/laboratory data Narrative",
+                            }]},
                             "entry": [{"reference": f"Observation/{observation_id}"}],
                         },
                     ],
@@ -185,131 +176,92 @@ def generate_eicr(patient_data: dict) -> dict:
                 "resource": {
                     "resourceType": "Patient",
                     "id": pid,
-                    "name": [
-                        {
-                            "use": "official",
-                            "text": patient_data.get("name", "姓名未知"),
-                        }
-                    ],
+                    "name": [{"use": "official", "text": patient_data.get("name", "姓名未知")}],
                     "birthDate": patient_data.get("birthDate", "1990-01-01"),
-                    "gender": patient_data.get("gender", "unknown"),
-                    "telecom": [
-                        {
-                            "system": "phone",
-                            "value": patient_data.get("phone", "未提供"),
-                            "use": "home",
-                        }
-                    ]
-                    if patient_data.get("phone")
-                    else [],
-                    "address": [
-                        {
-                            "use": "home",
-                            "district": patient_data.get("county", "台北市"),
-                            "country": "TW",
-                        }
-                    ],
+                    "gender":    patient_data.get("gender", "unknown"),
+                    "telecom": ([{
+                        "system": "phone",
+                        "value":  patient_data["phone"],
+                        "use":    "home",
+                    }] if patient_data.get("phone") else []),
+                    "address": [{
+                        "use":      "home",
+                        "line":     [home_address] if home_address else [],
+                        "district": home_district or county,
+                        "city":     county,
+                        "country":  "TW",
+                    }],
                 },
             },
-            # ── 3. Condition（通報病例診斷） ────────────────────────────────────
+            # ── 3. Condition ──────────────────────────────────────────────────
             {
                 "fullUrl": f"Condition/{condition_id}",
                 "resource": {
                     "resourceType": "Condition",
                     "id": condition_id,
-                    "meta": {
-                        "profile": [
-                            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-condition"
-                        ]
-                    },
-                    "clinicalStatus": {
-                        "coding": [
-                            {
-                                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
-                                "code": status_raw,
-                                "display": status_raw.capitalize(),
-                            }
-                        ]
-                    },
-                    "verificationStatus": {
-                        "coding": [
-                            {
-                                "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
-                                "code": CLINICAL_STATUS_CODES.get(
-                                    status_raw, "provisional"
-                                ),
-                            }
-                        ]
-                    },
-                    "category": [
-                        {
-                            "coding": [
-                                {
-                                    "system": "http://terminology.hl7.org/CodeSystem/condition-category",
-                                    "code": "encounter-diagnosis",
-                                    "display": "Encounter Diagnosis",
-                                }
-                            ]
-                        }
-                    ],
+                    "meta": {"profile": [
+                        "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-condition"
+                    ]},
+                    "clinicalStatus": {"coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                        "code":   status_raw,
+                        "display": status_raw.capitalize(),
+                    }]},
+                    "verificationStatus": {"coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                        "code":   CLINICAL_STATUS_CODES.get(status_raw, "provisional"),
+                    }]},
+                    "category": [{"coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                        "code":   "encounter-diagnosis",
+                        "display": "Encounter Diagnosis",
+                    }]}],
                     "code": {
-                        "coding": [
-                            {
-                                "system": "http://snomed.info/sct",
-                                "code": code_info["snomed"],
-                                "display": code_info["display"],
-                            }
-                        ],
+                        "coding": [{
+                            "system":  "http://snomed.info/sct",
+                            "code":    code_info["snomed"],
+                            "display": code_info["display"],
+                        }],
                         "text": disease,
                     },
-                    "subject": {"reference": f"Patient/{pid}"},
-                    "onsetDateTime": encounter_dt,
-                    "recordedDate": _now_iso(),
+                    "subject":         {"reference": f"Patient/{pid}"},
+                    "onsetDateTime":   encounter_dt,
+                    "recordedDate":    report_dt,
                 },
             },
-            # ── 4. Observation（檢驗觀察） ─────────────────────────────────────
+            # ── 4. Observation ────────────────────────────────────────────────
             {
                 "fullUrl": f"Observation/{observation_id}",
                 "resource": {
                     "resourceType": "Observation",
                     "id": observation_id,
                     "status": "preliminary",
-                    "category": [
-                        {
-                            "coding": [
-                                {
-                                    "system": "http://terminology.hl7.org/CodeSystem/observation-category",
-                                    "code": "laboratory",
-                                    "display": "Laboratory",
-                                }
-                            ]
-                        }
-                    ],
+                    "category": [{"coding": [{
+                        "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                        "code":   "laboratory",
+                        "display": "Laboratory",
+                    }]}],
                     "code": {
-                        "coding": [
-                            {
-                                "system": "http://loinc.org",
-                                "code": code_info["loinc_panel"],
-                                "display": code_info["loinc_display"],
-                            }
-                        ],
+                        "coding": [{
+                            "system":  "http://loinc.org",
+                            "code":    code_info["loinc_panel"],
+                            "display": code_info["loinc_display"],
+                        }],
                         "text": f"{disease} 檢驗",
                     },
-                    "subject": {"reference": f"Patient/{pid}"},
+                    "subject":           {"reference": f"Patient/{pid}"},
                     "effectiveDateTime": encounter_dt,
                     "valueCodeableConcept": {
-                        "coding": [
-                            {
-                                "system": "http://snomed.info/sct",
-                                "code": "52101004",
-                                "display": "Present",
-                            }
-                        ],
+                        "coding": [{
+                            "system":  "http://snomed.info/sct",
+                            "code":    "52101004",
+                            "display": "Present",
+                        }],
                         "text": symptoms_text,
                     },
                 },
             },
-            # ── 5. Encounter（就診紀錄） ────────────────────────────────────────
+            # ── 5. Encounter ──────────────────────────────────────────────────
             {
                 "fullUrl": f"Encounter/{encounter_id}",
                 "resource": {
@@ -317,46 +269,52 @@ def generate_eicr(patient_data: dict) -> dict:
                     "id": encounter_id,
                     "status": "finished",
                     "class": {
-                        "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
-                        "code": "AMB",
+                        "system":  "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+                        "code":    "AMB",
                         "display": "ambulatory",
                     },
-                    "type": [
-                        {
-                            "coding": [
-                                {
-                                    "system": "http://snomed.info/sct",
-                                    "code": "11429006",
-                                    "display": "Consultation",
-                                }
-                            ]
-                        }
-                    ],
-                    "subject": {"reference": f"Patient/{pid}"},
-                    "period": {
-                        "start": encounter_dt,
-                        "end": encounter_dt,
-                    },
+                    "type": [{"coding": [{
+                        "system":  "http://snomed.info/sct",
+                        "code":    "11429006",
+                        "display": "Consultation",
+                    }]}],
+                    "subject":         {"reference": f"Patient/{pid}"},
+                    "serviceProvider": {"reference": f"Organization/{hospital_org_id}"},
+                    "period": {"start": encounter_dt, "end": encounter_dt},
                 },
             },
-            # ── 6. Organization（通報機構：疾管署） ─────────────────────────────
+            # ── 6. Organization — 通報醫療院所 ─────────────────────────────────
             {
-                "fullUrl": f"Organization/{org_id}",
+                "fullUrl": f"Organization/{hospital_org_id}",
                 "resource": {
                     "resourceType": "Organization",
-                    "id": org_id,
-                    "name": "衛生福利部疾病管制署",
+                    "id": hospital_org_id,
+                    "type": [{"coding": [{
+                        "system":  "http://terminology.hl7.org/CodeSystem/organization-type",
+                        "code":    "prov",
+                        "display": "Healthcare Provider",
+                    }]}],
+                    "name": hospital_name,
+                    "address": [{
+                        "text":    hospital_address,
+                        "country": "TW",
+                    }] if hospital_address else [],
+                },
+            },
+            # ── 7. Organization — 衛生福利部疾病管制署（custodian） ──────────────
+            {
+                "fullUrl": f"Organization/{cdc_org_id}",
+                "resource": {
+                    "resourceType": "Organization",
+                    "id": cdc_org_id,
+                    "name":  "衛生福利部疾病管制署",
                     "alias": ["Taiwan CDC"],
-                    "telecom": [
-                        {"system": "url", "value": "https://www.cdc.gov.tw"}
-                    ],
-                    "address": [
-                        {
-                            "line": ["林森北路161號"],
-                            "city": "台北市",
-                            "country": "TW",
-                        }
-                    ],
+                    "telecom": [{"system": "url", "value": "https://www.cdc.gov.tw"}],
+                    "address": [{
+                        "line":    ["林森北路161號"],
+                        "city":    "台北市",
+                        "country": "TW",
+                    }],
                 },
             },
         ],
@@ -366,48 +324,48 @@ def generate_eicr(patient_data: dict) -> dict:
 
 
 def save_eicr(bundle: dict, output_dir: str = "output") -> str:
-    """
-    將 eICR Bundle 存成 JSON 檔案。
-
-    Returns
-    -------
-    str  儲存的完整檔案路徑
-    """
+    """將 eICR Bundle 存成 JSON 檔案，回傳完整路徑。"""
     import os
-
     os.makedirs(output_dir, exist_ok=True)
     bundle_id = bundle.get("id", _new_uuid())
-    filename = f"eicr_{bundle_id[:8]}.json"
-    filepath = os.path.join(output_dir, filename)
-
+    filepath  = os.path.join(output_dir, f"eicr_{bundle_id[:8]}.json")
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(bundle, f, ensure_ascii=False, indent=2)
-
     return filepath
 
 
-# ── 獨立執行：產生範例 eICR 並印出 ────────────────────────────────────────────
+# ── 獨立執行：產生範例 eICR ────────────────────────────────────────────────────
 if __name__ == "__main__":
+    from datetime import timedelta
+    enc_dt = (datetime.now(timezone.utc) - timedelta(days=2, hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rep_dt = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     sample_patient = {
-        "id": "patient-demo-001",
-        "name": "王小明",
-        "birthDate": "1990-03-15",
-        "gender": "male",
-        "disease": "COVID-19",
-        "county": "台北市",
-        "status": "suspected",
-        "encounter_date": "2026-05-28T09:30:00Z",
-        "symptoms": ["發燒", "咳嗽", "呼吸困難"],
-        "phone": "0912-345-678",
+        "id":               "patient-demo-001",
+        "name":             "王小明",
+        "birthDate":        "1990-03-15",
+        "gender":           "male",
+        "disease":          "COVID-19",
+        "county":           "台北市",
+        "status":           "suspected",
+        "encounter_date":   enc_dt,
+        "report_date":      rep_dt,
+        "symptoms":         ["發燒", "咳嗽", "呼吸困難"],
+        "phone":            "0912-345-678",
+        "hospital_name":    "台大醫院",
+        "hospital_address": "台北市中正區中山南路7號",
+        "home_address":     "台北市大安區信義路100號",
+        "home_district":    "大安區",
     }
 
     bundle = generate_eicr(sample_patient)
-    path = save_eicr(bundle, output_dir="output")
+    path   = save_eicr(bundle, output_dir="output")
     print(f"✅ eICR 已產生：{path}")
-    print(f"   Bundle ID : {bundle['id']}")
-    print(f"   病患姓名  : {sample_patient['name']}")
-    print(f"   疾病      : {sample_patient['disease']}")
-    print(f"   狀態      : {sample_patient['status']}")
-    print(f"   條目數    : {len(bundle['entry'])} 個 FHIR resources")
+    print(f"   Bundle ID  : {bundle['id']}")
+    print(f"   病患姓名   : {sample_patient['name']}")
+    print(f"   疾病       : {sample_patient['disease']}")
+    print(f"   就診時間   : {enc_dt}")
+    print(f"   通報時間   : {rep_dt}")
+    print(f"   條目數     : {len(bundle['entry'])} 個 FHIR resources")
     print()
-    print(json.dumps(bundle, ensure_ascii=False, indent=2)[:800], "...")
+    print(json.dumps(bundle, ensure_ascii=False, indent=2)[:1000], "...")

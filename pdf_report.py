@@ -1,6 +1,7 @@
 """
 pdf_report.py — eICR 通報單 PDF 產生器
-字型：STHeiti Medium.ttc 提取繁體子字型，由 fpdf2 直接 Unicode 映射
+字型：優先使用 fonts/NotoSansTC-Regular.ttf（隨 repo 發布），
+      macOS 退回使用 STHeiti Medium.ttc
 格式：仿衛福部疾病管制署「傳染病個案通報單」，黑白正式版
 """
 
@@ -8,8 +9,11 @@ import io
 import os
 import tempfile
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fpdf import FPDF
+
+_TZ_TPE = ZoneInfo("Asia/Taipei")
 
 # ── 字型準備 ──────────────────────────────────────────────────────────────────
 _TMP_FONT_PATH: str | None = None
@@ -56,10 +60,12 @@ def _prepare_font() -> str | None:
 # ── 工具函式 ──────────────────────────────────────────────────────────────────
 
 def _fmt_dt(iso: str) -> str:
+    """ISO 8601 UTC → Asia/Taipei 格式化（PDF 顯示用）"""
     if not iso:
         return "—"
     try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%Y/%m/%d %H:%M")
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.astimezone(_TZ_TPE).strftime("%Y/%m/%d %H:%M")
     except Exception:
         return iso
 
@@ -146,7 +152,7 @@ def generate_eicr_pdf(eicr: dict, hospital_name: str = "XX 醫院") -> bytes:
     """產生傳染病個案通報單 PDF（黑白正式格式，繁體中文完整支援）。"""
     font_path = _prepare_font()
     if not font_path:
-        raise RuntimeError("找不到支援繁體中文的字型檔（STHeiti / PingFang）")
+        raise RuntimeError("找不到支援繁體中文的字型檔（請確認 fonts/NotoSansTC-Regular.ttf 存在）")
 
     pdf = _NotificationForm(font_path)
     W = pdf.PW
@@ -224,7 +230,7 @@ def generate_eicr_pdf(eicr: dict, hospital_name: str = "XX 醫院") -> bytes:
     pdf.row2([("機構地址", org.get("address", "—")[:40]),
               ("機構網站", org.get("url", "—"))])
     pdf.row2([("通報醫師", "（請簽章）"),
-              ("通報日期", datetime.now().strftime("%Y/%m/%d"))])
+              ("通報日期", datetime.now(_TZ_TPE).strftime("%Y/%m/%d"))])
 
     # ── 簽章欄 ────────────────────────────────────────────────────────────────
     # 用 cell()（不換行），避免簽名底線文字超過 sign_w 發生多行偏位
