@@ -562,6 +562,31 @@ def make_temporal_map(df: pd.DataFrame, height: int = 460) -> go.Figure:
     return fig
 
 
+_DAYS_SL_KEYS = tuple(f"days_sl_{s}" for s in ("map", "trend", "cases", "demo", "track"))
+
+
+def _sync_days(key: str) -> None:
+    val = st.session_state[key]
+    st.session_state["cfg_days_range"] = val
+    for k in _DAYS_SL_KEYS:
+        if k != key:
+            st.session_state[k] = val
+
+
+def _days_slider(suffix: str) -> None:
+    key = f"days_sl_{suffix}"
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get("cfg_days_range", 35)
+    _, sc = st.columns([3, 1])
+    with sc:
+        st.slider(
+            "天數範圍", 7, 365, step=1, key=key,
+            on_change=_sync_days, args=(key,),
+            label_visibility="collapsed",
+            help="顯示近 N 天資料，各頁籤同步套用",
+        )
+
+
 def make_trend_figure(df: pd.DataFrame, days: int = 14,
                       disease_filter: str = "全部") -> go.Figure:
     if df.empty or "date" not in df.columns:
@@ -1046,7 +1071,7 @@ def main():
                 key="map_mode_seg",
             ) or _MAP_MODES[0]
 
-            # ── 第二列：疾病 toggle ───────────────────────────────────────
+            # ── 第二列：疾病 toggle + 天數 slider ───────────────────────────
             _, tc1, tc2, tc3 = st.columns([4, 1, 1, 1])
             s_covid  = tc1.checkbox(f"{DISEASE_EMOJI['COVID-19']} COVID-19",
                                     value=False, key="map_d_covid")
@@ -1055,14 +1080,19 @@ def main():
             s_flu    = tc3.checkbox(f"{DISEASE_EMOJI['Influenza']} 流感",
                                     value=False, key="map_d_flu")
 
+            _days_slider("map")
+
             sel_d = [d for d, s in [
                 ("COVID-19", s_covid), ("Dengue", s_dengue), ("Influenza", s_flu)
             ] if s] or list(DISEASE_ZH)  # 若全取消，退回顯示全部
 
-            # 依 checkbox 過濾（以 df_all 為基底，保留 status 過濾）
+            # 依 checkbox + 日期範圍過濾（以 df_all 為基底）
+            cutoff_date = (datetime.now(TZ_TPE) - timedelta(days=days_val)).date()
             base = df_all.copy()
             if status_val != "全部":
                 base = base[base["status"] == status_val]
+            if "date" in base.columns:
+                base = base[base["date"] >= cutoff_date]
             map_df = base[base["disease"].isin(sel_d)]
 
             MAP_H = 450
@@ -1094,6 +1124,7 @@ def main():
     # ── Tab 2：趨勢分析 ─────────────────────────────────────────────────────────
     with tab_trend:
         with st.container(height=TAB_H, border=False):
+            _days_slider("trend")
             st.plotly_chart(make_trend_figure(df_all, days_val, disease_val),
                             use_container_width=True)
             if "date" in df_all.columns:
@@ -1116,14 +1147,17 @@ def main():
 
     # ── Tab 3：案例明細 & 通報單 ─────────────────────────────────────────────────
     with tab_cases:
-        if df.empty:
-            st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件。")
+        _days_slider("cases")
+        _cutoff_cases = (datetime.now(TZ_TPE) - timedelta(days=days_val)).date()
+        df_cases = (df[df["date"] >= _cutoff_cases] if "date" in df.columns else df).reset_index(drop=True)
+        if df_cases.empty:
+            st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件，或拉長天數範圍。")
         else:
             list_col, view_col = st.columns([0.40, 0.60], gap="small")
 
             with list_col:
                 st.caption(
-                    f"共 {len(df)} 筆（最近 50 筆）｜點 📋 查閱通報單",
+                    f"共 {len(df_cases)} 筆（近 {days_val} 天，最多顯示 50 筆）｜點 📋 查閱通報單",
                     help="點選任一列的 📋 按鈕，右側即顯示 eICR 通報單內容",
                 )
                 with st.container(height=LIST_H, border=True):
@@ -1138,7 +1172,7 @@ def main():
                     st.markdown("<hr style='margin:2px 0;border-color:#ddd'>",
                                 unsafe_allow_html=True)
 
-                    view_df = df.head(50).reset_index(drop=True)
+                    view_df = df_cases.head(50).reset_index(drop=True)
                     sel_idx = ss.get("eicr_index", -1)
 
                     for i, row in view_df.iterrows():
@@ -1220,13 +1254,18 @@ def main():
     # ── Tab 4：人口統計 ─────────────────────────────────────────────────────────
     with tab_demo:
         with st.container(height=TAB_H, border=False):
+            _days_slider("demo")
+            _cutoff_demo = (datetime.now(TZ_TPE) - timedelta(days=days_val)).date()
+            df_demo = (df_all[df_all["date"] >= _cutoff_demo]
+                       if "date" in df_all.columns else df_all)
+
             d1c, d2c = st.columns(2)
             with d1c:
-                st.plotly_chart(make_age_chart(df_all), use_container_width=True)
+                st.plotly_chart(make_age_chart(df_demo), use_container_width=True)
 
                 # 性別分布
-                if not df_all.empty and "gender" in df_all.columns:
-                    gender_counts = df_all["gender"].map(GENDER_LABEL).value_counts()
+                if not df_demo.empty and "gender" in df_demo.columns:
+                    gender_counts = df_demo["gender"].map(GENDER_LABEL).value_counts()
                     fig_g = go.Figure(go.Bar(
                         x=gender_counts.index.tolist(),
                         y=gender_counts.values.tolist(),
@@ -1243,13 +1282,13 @@ def main():
                     st.plotly_chart(fig_g, use_container_width=True)
 
             with d2c:
-                st.plotly_chart(make_symptom_chart(df_all), use_container_width=True)
+                st.plotly_chart(make_symptom_chart(df_demo), use_container_width=True)
 
                 # 疑似 vs 確診比率
-                if not df_all.empty and "status" in df_all.columns:
+                if not df_demo.empty and "status" in df_demo.columns:
                     st.markdown("**疾病確診率**")
                     stat_tbl = (
-                        df_all.groupby(["disease", "status"])
+                        df_demo.groupby(["disease", "status"])
                         .size().unstack(fill_value=0)
                         .reset_index()
                     )
@@ -1271,6 +1310,7 @@ def main():
     # ── Tab 5：通報追蹤 ─────────────────────────────────────────────────────────
     with tab_track:
         with st.container(height=TAB_H, border=False):
+            _days_slider("track")
             # ── MedMorph 流程圖 ────────────────────────────────────────────────
             st.markdown("#### 🔄 MedMorph 自動通報架構")
             st.markdown(pipeline_html(), unsafe_allow_html=True)
@@ -1309,6 +1349,9 @@ def main():
             # ── Phase B 送出記錄 ───────────────────────────────────────────────
             st.markdown("#### 📋 Phase B 通報送出記錄")
             sdf = load_submissions(db_path_val)
+            if not sdf.empty and "submitted_at" in sdf.columns:
+                _cutoff_track = datetime.now(TZ_TPE) - timedelta(days=days_val)
+                sdf = sdf[sdf["submitted_at"] >= _cutoff_track]
 
             if sdf.empty:
                 st.info("尚無送出記錄。請執行 seed_data.py 或等候 MedMorph 引擎產生新案例。")
@@ -1418,13 +1461,11 @@ def main():
                         "全部": "全部", "suspected": "🟡 疑似", "confirmed": "🔴 確診"
                     }.get(x, x),
                 )
-                new_days = st.slider("趨勢圖天數範圍", 7, 365, days_val, 1)
                 if st.button("✅ 套用設定", type="primary", use_container_width=True):
                     ss["cfg_hospital"]       = new_hospital
                     ss["cfg_db_path"]        = new_db
                     ss["cfg_disease_filter"] = new_disease
                     ss["cfg_status_filter"]  = new_status
-                    ss["cfg_days_range"]     = new_days
                     st.cache_data.clear()
                     st.success("✅ 設定已套用！")
                     st.rerun()
