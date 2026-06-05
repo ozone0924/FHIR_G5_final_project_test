@@ -2,19 +2,22 @@
 run_all.py — 一鍵啟動腳本
 ===========================
 步驟：
-  1. 安裝套件（若尚未安裝）
+  1. 確認套件已安裝（uv sync 或 pip install）
   2. 注入假資料（seed_data）
   3. 背景啟動 MedMorph 引擎
   4. 前景啟動 Streamlit 儀表板
 
 使用方式：
+  uv run python run_all.py              # 建議（自動用 .venv）
   python run_all.py
-  python run_all.py --skip-seed      # 不重新注入假資料
-  python run_all.py --skip-engine    # 只跑儀表板，不啟動引擎
+  python run_all.py --skip-seed         # 不重新注入假資料
+  python run_all.py --skip-engine       # 只跑儀表板
+  python run_all.py --port 8502         # 指定 port
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -22,64 +25,83 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _python() -> list[str]:
+    """回傳優先使用 uv run python 的執行指令前綴"""
+    if shutil.which("uv") and os.path.exists(os.path.join(HERE, "pyproject.toml")):
+        return ["uv", "run", "python"]
+    return [sys.executable]
+
+
 def run_cmd(cmd: list, **kwargs) -> subprocess.Popen:
     print(f"  $ {' '.join(cmd)}")
     return subprocess.Popen(cmd, cwd=HERE, **kwargs)
 
 
-def install_deps():
-    print("\n📦 安裝 Python 套件…")
-    req = os.path.join(HERE, "requirements.txt")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", req, "-q"],
-        check=True, cwd=HERE,
-    )
-    print("   ✅ 套件安裝完成")
+def ensure_deps():
+    """確認套件可 import；若不行則自動 uv sync 或 pip install"""
+    try:
+        import streamlit  # noqa: F401
+        import plotly     # noqa: F401
+        import pandas     # noqa: F401
+    except ImportError:
+        if shutil.which("uv"):
+            print("\n📦 執行 uv sync 安裝套件…")
+            subprocess.run(["uv", "sync"], check=True, cwd=HERE)
+        else:
+            print("\n📦 執行 pip install…")
+            req = os.path.join(HERE, "requirements.txt")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", req, "-q"],
+                check=True, cwd=HERE,
+            )
+        print("   ✅ 套件安裝完成")
 
 
-def seed_data():
-    print("\n🌱 注入假資料…")
+def seed_data(count: int = 150, days: int = 30):
+    print(f"\n🌱 注入假資料（{count} 筆 / {days} 天）…")
     subprocess.run(
-        [sys.executable, "seed_data.py", "--count", "150", "--days", "30"],
+        _python() + ["seed_data.py", "--count", str(count), "--days", str(days)],
         check=True, cwd=HERE,
     )
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="傳染病公衛監測系統 — 一鍵啟動")
     parser.add_argument("--skip-seed",   action="store_true", help="跳過假資料注入")
     parser.add_argument("--skip-engine", action="store_true", help="跳過 MedMorph 引擎")
-    parser.add_argument("--port", type=int, default=8501, help="Streamlit port（預設 8501）")
+    parser.add_argument("--port",        type=int, default=8501, help="Streamlit port（預設 8501）")
+    parser.add_argument("--count",       type=int, default=150,  help="假資料筆數（預設 150）")
+    parser.add_argument("--days",        type=int, default=30,   help="資料涵蓋天數（預設 30）")
     args = parser.parse_args()
 
     print("=" * 50)
     print("  🏥 傳染病公衛監測系統 — 第五組")
     print("=" * 50)
 
-    install_deps()
+    ensure_deps()
 
     if not args.skip_seed:
-        seed_data()
+        seed_data(count=args.count, days=args.days)
 
     processes = []
 
     if not args.skip_engine:
         print("\n🚀 啟動 MedMorph 引擎（背景）…")
         p_engine = run_cmd(
-            [sys.executable, "medmorph_engine.py"],
+            _python() + ["medmorph_engine.py"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
         processes.append(p_engine)
         time.sleep(2)
-        print("   ✅ 引擎已在背景執行（PID %d）" % p_engine.pid)
+        print(f"   ✅ 引擎已在背景執行（PID {p_engine.pid}）")
 
     print(f"\n🌐 啟動 Streamlit 儀表板 → http://localhost:{args.port}")
     print("   按 Ctrl+C 停止所有服務\n")
     p_dash = run_cmd(
-        [sys.executable, "-m", "streamlit", "run", "dashboard.py",
-         "--server.port", str(args.port),
-         "--server.headless", "false"],
+        _python() + ["-m", "streamlit", "run", "dashboard.py",
+                     "--server.port", str(args.port),
+                     "--server.headless", "false"],
     )
     processes.append(p_dash)
 

@@ -10,7 +10,7 @@
   - 每 15 秒自動刷新
 
 使用方式：
-  streamlit run dashboard.py
+  uv run streamlit run dashboard.py
   streamlit run dashboard.py -- --db data/cases.db
 """
 
@@ -121,23 +121,19 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部") -> go.Figu
         )
         return fig
 
-    # 篩選疾病
     plot_df = df if disease_filter == "全部" else df[df["disease"] == disease_filter]
 
-    # 依縣市+疾病彙總
     grouped = (
         plot_df.groupby(["county", "disease"])
         .size()
         .reset_index(name="count")
     )
 
-    # 加入座標
     grouped["lat"] = grouped["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[0])
     grouped["lon"] = grouped["county"].map(lambda c: COUNTY_COORDS.get(c, (23.8, 121.0))[1])
     grouped["disease_zh"] = grouped["disease"].map(DISEASE_ZH)
     grouped["color"] = grouped["disease"].map(DISEASE_COLORS)
 
-    # 計算縣市總案例（用於泡泡大小）
     county_total = grouped.groupby("county")["count"].sum().reset_index(name="total")
     grouped = grouped.merge(county_total, on="county")
 
@@ -172,7 +168,7 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部") -> go.Figu
     return fig
 
 
-def make_trend_figure(df: pd.DataFrame, days: int = 14) -> go.Figure:
+def make_trend_figure(df: pd.DataFrame, days: int = 14, disease_filter: str = "全部") -> go.Figure:
     """產生每日新增案例時間趨勢折線圖"""
     if df.empty or "date" not in df.columns:
         fig = go.Figure()
@@ -183,19 +179,22 @@ def make_trend_figure(df: pd.DataFrame, days: int = 14) -> go.Figure:
         )
         return fig
 
-    # 最近 N 天
     cutoff = (datetime.now() - timedelta(days=days)).date()
     recent = df[df["date"] >= cutoff]
 
-    # 建立完整日期序列（補 0）
     all_dates = pd.date_range(
         start=cutoff,
         end=datetime.now().date(),
         freq="D",
     ).date
 
+    diseases = (
+        [disease_filter] if disease_filter != "全部"
+        else ["COVID-19", "Dengue", "Influenza"]
+    )
+
     fig = go.Figure()
-    for disease in ["COVID-19", "Dengue", "Influenza"]:
+    for disease in diseases:
         sub = recent[recent["disease"] == disease]
         daily = sub.groupby("date").size().reset_index(name="count")
         daily_full = (
@@ -282,10 +281,10 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # ── 自動刷新計數器（每 15 秒）──────────────────────────────────────────────
-    count = st_autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
+    # 自動刷新（每 15 秒）
+    st_autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
 
-    # ── CSS 美化 ────────────────────────────────────────────────────────────────
+    # CSS
     st.markdown(
         """
         <style>
@@ -307,23 +306,20 @@ def main():
     )
 
     # ── 標題列 ──────────────────────────────────────────────────────────────────
-    col_title, col_refresh = st.columns([4, 1])
+    col_title, col_refresh = st.columns([5, 1])
     with col_title:
         st.markdown("## 🏥 傳染病即時公衛儀表板")
-        st.caption("資料來源：MedMorph 自動通報引擎 · FHIR R4 · eICR 標準")
+        st.caption("資料來源：MedMorph 自動通報引擎 · FHIR R4 · eICR 標準 · NTU 智慧醫療期末專題 第五組")
     with col_refresh:
-        st.markdown(f"<br>⏱ 自動刷新中（{REFRESH_INTERVAL_MS // 1000}s）", unsafe_allow_html=True)
-        now_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-        st.caption(f"更新時間：{now_str}")
+        st.markdown(f"<br>⏱ 每 {REFRESH_INTERVAL_MS // 1000}s 自動刷新", unsafe_allow_html=True)
+        st.caption(datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
+        if st.button("🔄 立即刷新"):
+            st.cache_data.clear()
+            st.rerun()
 
     # ── 側邊欄 ──────────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.image(
-            "https://www.cdc.gov.tw/File/Get/7kJSUCWKNpxGOVf0UF52YQ",
-            width=120,
-        ) if False else st.markdown("### ⚙️ 篩選條件")
-
-        st.markdown("### ⚙️ 篩選條件")
+        st.markdown("## ⚙️ 篩選條件")
 
         db_path_input = st.text_input("資料庫路徑", value=DB_PATH)
 
@@ -344,18 +340,23 @@ def main():
         days_range = st.slider("趨勢圖天數範圍", min_value=7, max_value=60, value=14, step=7)
 
         st.markdown("---")
-        st.markdown("**資料說明**")
-        st.markdown(
-            "本儀表板讀取 MedMorph 引擎\n"
-            "產生的 SQLite 案例資料庫，\n"
-            "每 15 秒自動刷新。"
-        )
         st.markdown("**三組疾病**")
         for d, zh in DISEASE_ZH.items():
             st.markdown(f"- {DISEASE_EMOJI[d]} {zh}")
 
+        st.markdown("---")
+        st.caption("資料每 15 秒自動刷新，或點上方「立即刷新」按鈕手動更新。")
+
     # ── 資料載入 ────────────────────────────────────────────────────────────────
     df_all = load_cases(db_path_input)
+
+    if df_all.empty:
+        st.warning(
+            "⚠️ 尚無資料。請先執行：\n\n"
+            "```bash\n"
+            "uv run python seed_data.py\n"
+            "```"
+        )
 
     # 套用篩選
     df = df_all.copy()
@@ -368,9 +369,7 @@ def main():
     st.markdown("### 📊 即時案例統計")
 
     def get_count(disease: str) -> int:
-        if df_all.empty:
-            return 0
-        return len(df_all[df_all["disease"] == disease])
+        return 0 if df_all.empty else len(df_all[df_all["disease"] == disease])
 
     def get_today_count(disease: str) -> int:
         if df_all.empty or "date" not in df_all.columns:
@@ -379,7 +378,7 @@ def main():
         return len(df_all[(df_all["disease"] == disease) & (df_all["date"] == today)])
 
     total_all = len(df_all)
-    today_all = get_today_count("COVID-19") + get_today_count("Dengue") + get_today_count("Influenza")
+    today_all = sum(get_today_count(d) for d in DISEASE_ZH)
 
     kpi_cols = st.columns(4)
 
@@ -394,21 +393,17 @@ def main():
         )
 
     disease_meta = [
-        ("COVID-19", "#E74C3C", "linear-gradient(135deg,#b71c1c,#e53935)"),
-        ("Dengue",   "#F39C12", "linear-gradient(135deg,#e65100,#ff9800)"),
-        ("Influenza","#3498DB", "linear-gradient(135deg,#1565c0,#1e88e5)"),
+        ("COVID-19",  "linear-gradient(135deg,#b71c1c,#e53935)"),
+        ("Dengue",    "linear-gradient(135deg,#e65100,#ff9800)"),
+        ("Influenza", "linear-gradient(135deg,#1565c0,#1e88e5)"),
     ]
-    for i, (disease, _, gradient) in enumerate(disease_meta):
+    for i, (disease, gradient) in enumerate(disease_meta):
         with kpi_cols[i + 1]:
-            count_val = get_count(disease)
-            today_val = get_today_count(disease)
-            zh = DISEASE_ZH[disease]
-            emoji = DISEASE_EMOJI[disease]
             st.markdown(
                 f"""<div class="metric-card" style="background:{gradient}">
-                    <div class="metric-value">{count_val}</div>
-                    <div class="metric-label">{emoji} {zh}</div>
-                    <div class="metric-sub">今日 +{today_val}</div>
+                    <div class="metric-value">{get_count(disease)}</div>
+                    <div class="metric-label">{DISEASE_EMOJI[disease]} {DISEASE_ZH[disease]}</div>
+                    <div class="metric-sub">今日 +{get_today_count(disease)}</div>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -416,32 +411,37 @@ def main():
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
     # ── 地圖 + 縣市橫條圖 ──────────────────────────────────────────────────────
-    st.markdown("### 🗺️ 地理分布")
-    map_col, bar_col = st.columns([3, 2])
+    if not df_all.empty:
+        st.markdown("### 🗺️ 地理分布")
+        map_col, bar_col = st.columns([3, 2])
 
-    with map_col:
-        st.markdown(f"**台灣各縣市傳染病熱點地圖**（篩選：{DISEASE_ZH.get(disease_filter, '全部')}）")
-        fig_map = make_map_figure(df, disease_filter=disease_filter)
-        st.plotly_chart(fig_map, use_container_width=True, config={"scrollZoom": True})
+        with map_col:
+            label = DISEASE_ZH.get(disease_filter, "全部")
+            st.markdown(f"**台灣各縣市傳染病熱點地圖**（{label}）")
+            fig_map = make_map_figure(df, disease_filter=disease_filter)
+            st.plotly_chart(fig_map, use_container_width=True, config={"scrollZoom": True})
 
-    with bar_col:
-        st.markdown("**各縣市案例堆疊分布**")
-        fig_bar = make_county_bar(df)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        with bar_col:
+            st.markdown("**各縣市案例堆疊分布**")
+            fig_bar = make_county_bar(df)
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-    # ── 時間趨勢折線圖 ──────────────────────────────────────────────────────────
-    st.markdown("### 📈 時間趨勢")
-    fig_trend = make_trend_figure(df_all, days=days_range)
-    st.plotly_chart(fig_trend, use_container_width=True)
+        # ── 時間趨勢折線圖 ──────────────────────────────────────────────────────
+        st.markdown("### 📈 時間趨勢")
+        fig_trend = make_trend_figure(df_all, days=days_range, disease_filter=disease_filter)
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
     # ── 最近案例明細表 ─────────────────────────────────────────────────────────
     st.markdown("### 📋 最近案例明細")
     if df.empty:
-        st.info("⚠️ 目前沒有符合條件的案例。請先執行 `python seed_data.py` 或啟動 MedMorph 引擎。")
+        st.info("⚠️ 目前沒有符合條件的案例。" + (
+            "請調整篩選條件，或執行 `uv run python seed_data.py` 注入資料。"
+            if not df_all.empty else ""
+        ))
     else:
         display_df = df[["patient_name", "disease", "county", "status", "report_date", "gender"]].copy()
         display_df.columns = ["姓名", "疾病", "縣市", "狀態", "通報時間", "性別"]
@@ -454,17 +454,16 @@ def main():
         display_df["性別"] = display_df["性別"].map(
             {"male": "男", "female": "女", "unknown": "未知"}.get
         )
-        if "通報時間" in display_df.columns:
-            display_df["通報時間"] = pd.to_datetime(
-                display_df["通報時間"], utc=True, errors="coerce"
-            ).dt.strftime("%Y/%m/%d %H:%M")
+        display_df["通報時間"] = pd.to_datetime(
+            display_df["通報時間"], utc=True, errors="coerce"
+        ).dt.strftime("%Y/%m/%d %H:%M")
 
         st.dataframe(
             display_df.head(50),
             use_container_width=True,
             hide_index=True,
         )
-        st.caption(f"顯示最近 50 筆（共 {len(df)} 筆）")
+        st.caption(f"顯示最近 50 筆（共 {len(df)} 筆，篩選中）")
 
     # ── 頁尾 ────────────────────────────────────────────────────────────────────
     st.markdown("---")
