@@ -577,13 +577,25 @@ def _days_slider(suffix: str) -> None:
     key = f"days_sl_{suffix}"
     if key not in st.session_state:
         st.session_state[key] = st.session_state.get("cfg_days_range", 35)
-    _, sc = st.columns([3, 1])
+    val = int(st.session_state[key])
+    lc, sc = st.columns([1.6, 3])
+    with lc:
+        st.markdown(
+            f"<div style='padding:4px 0 2px 4px'>"
+            f"<div style='font-size:0.75rem;color:#888;font-weight:500'>📅 顯示時間範圍</div>"
+            f"<div style='font-size:1.25rem;font-weight:700;color:#4A9EFF;line-height:1.3'>"
+            f"近 {val} 天</div>"
+            f"<div style='font-size:0.68rem;color:#aaa'>⟳ 各頁籤同步套用</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
     with sc:
         st.slider(
-            "天數範圍", 7, 365, step=1, key=key,
+            "天數", 7, 365, step=1, key=key,
             on_change=_sync_days, args=(key,),
             label_visibility="collapsed",
-            help="顯示近 N 天資料，各頁籤同步套用",
+            format="%d 天",
+            help=f"目前顯示近 {val} 天的資料，拖曳調整後各頁籤同步套用",
         )
 
 
@@ -1147,20 +1159,54 @@ def main():
 
     # ── Tab 3：案例明細 & 通報單 ─────────────────────────────────────────────────
     with tab_cases:
-        _days_slider("cases")
-        _cutoff_cases = (datetime.now(TZ_TPE) - timedelta(days=days_val)).date()
-        df_cases = (df[df["date"] >= _cutoff_cases] if "date" in df.columns else df).reset_index(drop=True)
-        if df_cases.empty:
-            st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件，或拉長天數範圍。")
+        # ── 日期區間 picker ────────────────────────────────────────────────────
+        today_d = datetime.now(TZ_TPE).date()
+        if "cases_date_range" not in ss:
+            ss["cases_date_range"] = (today_d - timedelta(days=35), today_d)
+
+        dr_col, sp_col, info_col = st.columns([2.8, 0.2, 1])
+        with dr_col:
+            picked = st.date_input(
+                "📅 日期篩選範圍",
+                value=ss["cases_date_range"],
+                min_value=today_d - timedelta(days=730),
+                max_value=today_d,
+                format="YYYY/MM/DD",
+                key="cases_dr",
+            )
+        # 日期 input 回傳可能為 tuple(start,end) 或 tuple(start,)
+        if isinstance(picked, (list, tuple)) and len(picked) == 2:
+            start_d, end_d = picked[0], picked[1]
+            if (start_d, end_d) != ss["cases_date_range"]:
+                ss["cases_date_range"] = (start_d, end_d)
+                ss.pop("cases_show_n", None)   # 日期變動時重置翻頁
         else:
+            start_d = picked[0] if picked else today_d
+            end_d   = today_d
+
+        if "date" in df.columns:
+            df_cases = df[(df["date"] >= start_d) & (df["date"] <= end_d)].reset_index(drop=True)
+        else:
+            df_cases = df.reset_index(drop=True)
+
+        show_n = ss.get("cases_show_n", 50)
+
+        with info_col:
+            st.markdown(
+                f"<div style='padding:22px 0 0 8px;font-size:0.82rem;color:#888'>"
+                f"共 <b style='color:#4A9EFF;font-size:1rem'>{len(df_cases)}</b> 筆　"
+                f"顯示前 <b>{min(show_n, len(df_cases))}</b> 筆</div>",
+                unsafe_allow_html=True,
+            )
+
+        if df_cases.empty:
+            st.info("⚠️ 此日期範圍內沒有符合條件的案例。請調整日期範圍或至「⚙️ 設定」修改篩選條件。")
+        else:
+            CASES_LIST_H = TAB_H - 110
             list_col, view_col = st.columns([0.40, 0.60], gap="small")
 
             with list_col:
-                st.caption(
-                    f"共 {len(df_cases)} 筆（近 {days_val} 天，最多顯示 50 筆）｜點 📋 查閱通報單",
-                    help="點選任一列的 📋 按鈕，右側即顯示 eICR 通報單內容",
-                )
-                with st.container(height=LIST_H, border=True):
+                with st.container(height=CASES_LIST_H, border=True):
                     COLS = [0.28, 1.55, 1.45, 1.15, 1.05, 0.72]
                     hcols = st.columns(COLS)
                     for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報單"]):
@@ -1172,7 +1218,7 @@ def main():
                     st.markdown("<hr style='margin:2px 0;border-color:#ddd'>",
                                 unsafe_allow_html=True)
 
-                    view_df = df_cases.head(50).reset_index(drop=True)
+                    view_df = df_cases.head(show_n).reset_index(drop=True)
                     sel_idx = ss.get("eicr_index", -1)
 
                     for i, row in view_df.iterrows():
@@ -1212,14 +1258,29 @@ def main():
                             type="primary" if is_sel else "secondary",
                             use_container_width=True,
                         ):
-                            ss["eicr_case"]  = df.iloc[i]
+                            ss["eicr_case"]  = df_cases.iloc[i]
                             ss["eicr_index"] = i
                             st.rerun()
+
+                # ── 顯示更多 ────────────────────────────────────────────────
+                if show_n < len(df_cases):
+                    b1, b2 = st.columns(2)
+                    if b1.button(
+                        f"顯示更多（+50 筆）", use_container_width=True,
+                        help=f"目前 {min(show_n, len(df_cases))} 筆，共 {len(df_cases)} 筆",
+                    ):
+                        ss["cases_show_n"] = show_n + 50
+                        st.rerun()
+                    if b2.button(
+                        f"顯示全部（{len(df_cases)} 筆）", use_container_width=True,
+                    ):
+                        ss["cases_show_n"] = len(df_cases)
+                        st.rerun()
 
             with view_col:
                 if not is_viewing:
                     st.markdown(
-                        f"<div style='height:{LIST_H}px;display:flex;"
+                        f"<div style='height:{CASES_LIST_H}px;display:flex;"
                         f"align-items:center;justify-content:center;"
                         f"border:2px dashed #ccc;border-radius:8px;"
                         f"color:#bbb;font-size:1rem'>"
@@ -1243,7 +1304,7 @@ def main():
                             ss.pop("eicr_index", None)
                             st.rerun()
 
-                    panel_h = LIST_H - 42
+                    panel_h = CASES_LIST_H - 42
                     with st.container(height=panel_h, border=True):
                         eicr = parse_eicr(sel.get("eicr_path", ""))
                         if eicr is None:
