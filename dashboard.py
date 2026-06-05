@@ -388,10 +388,9 @@ def main():
 
     ss = st.session_state
 
-    # ── Auto-refresh：查閱 eICR 時暫停，避免畫面被刷新關閉 ──────────────────
+    # ── Auto-refresh：一律執行，session_state 保持 eICR 選取不會消失 ─────────
     is_viewing = "eicr_case" in ss
-    if not is_viewing:
-        st_autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
+    st_autorefresh(interval=REFRESH_INTERVAL_MS, key="auto_refresh")
 
     st.markdown("""
     <style>
@@ -420,12 +419,9 @@ def main():
         st.markdown("## 🏥 傳染病即時公衛儀表板")
         st.caption("MedMorph · FHIR R4 · HL7 eICR · NTU 智慧醫療期末專題 第五組")
     with h_right:
-        if is_viewing:
-            st.markdown("<br>⏸ 查閱中，暫停刷新", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<br>⏱ 每 {REFRESH_INTERVAL_MS//1000}s 刷新", unsafe_allow_html=True)
+        st.markdown(f"<br>⏱ 每 {REFRESH_INTERVAL_MS//1000}s 刷新", unsafe_allow_html=True)
         st.caption(datetime.now().strftime("%Y/%m/%d %H:%M:%S"))
-        if st.button("🔄 立即刷新", use_container_width=True, disabled=is_viewing):
+        if st.button("🔄 立即刷新", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -504,63 +500,99 @@ def main():
             summary.columns = ["疾病", f"近{days_val}天案例", "　疑似", "　確診"]
             st.dataframe(summary, use_container_width=True, hide_index=True)
 
-    # ── Tab 3：案例明細 & 通報單 ────────────────────────────────────────────────
+    # ── Tab 3：案例明細 & 通報單（左右分割面板） ─────────────────────────────────
     with tab_cases:
         if df.empty:
             st.info("⚠️ 目前沒有符合條件的案例。請至「⚙️ 設定」調整篩選條件。")
         else:
-            # ── 自訂表格（每列一個 📋 按鈕，不需捲到底部）──────────────────────
-            # 標頭列
-            hcols = st.columns([0.4, 1.8, 1.6, 1.4, 1.2, 1.6, 1.0, 0.55])
-            for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", "通報時間", "性別", ""]):
-                col.markdown(f"<b style='font-size:0.85rem;color:#555'>{lbl}</b>",
-                             unsafe_allow_html=True)
-            st.markdown("<hr style='margin:4px 0 2px'>", unsafe_allow_html=True)
+            list_col, view_col = st.columns([0.42, 0.58], gap="medium")
 
-            view_df = df.head(50).reset_index(drop=True)
-            for i, row in view_df.iterrows():
-                rcols = st.columns([0.4, 1.8, 1.6, 1.4, 1.2, 1.6, 1.0, 0.55])
-                d_zh  = f"{DISEASE_EMOJI.get(row['disease'],'')} {DISEASE_ZH.get(row['disease'], row['disease'])}"
-                s_zh  = STATUS_LABEL.get(row["status"], row["status"])
-                dt_str = row["report_date"].strftime("%Y/%m/%d %H:%M") if pd.notna(row["report_date"]) else ""
-                rcols[0].markdown(f"<span style='color:#aaa;font-size:0.82rem'>{i+1}</span>", unsafe_allow_html=True)
-                rcols[1].write(row["patient_name"])
-                rcols[2].write(d_zh)
-                rcols[3].write(row["county"])
-                rcols[4].write(s_zh)
-                rcols[5].markdown(f"<span style='font-size:0.88rem'>{dt_str}</span>", unsafe_allow_html=True)
-                rcols[6].write(GENDER_LABEL.get(row["gender"], row["gender"]))
-                # 📋 按鈕直接在每列旁邊
-                if rcols[7].button("📋", key=f"view_{i}", help="查閱 eICR 通報單"):
-                    ss["eicr_case"]  = df.iloc[i]
-                    ss["eicr_index"] = i
-                    st.rerun()
+            # ── 左：案例列表 ─────────────────────────────────────────────────
+            with list_col:
+                st.caption(f"共 {len(df)} 筆案例（顯示最近 50 筆）｜點 📋 查閱通報單")
 
-            st.caption(f"顯示最近 50 筆（共 {len(df)} 筆）｜點 📋 查閱 eICR 通報單")
-
-            # ── eICR 通報單內嵌顯示 ──────────────────────────────────────────
-            if is_viewing:
-                st.markdown("---")
-                close_col, title_col = st.columns([1, 8])
-                with close_col:
-                    if st.button("✕ 關閉", type="secondary"):
-                        del ss["eicr_case"]
-                        ss.pop("eicr_index", None)
-                        st.rerun()
-                with title_col:
-                    sel = ss["eicr_case"]
-                    sel_d  = DISEASE_ZH.get(sel["disease"], sel["disease"])
-                    sel_s  = STATUS_LABEL.get(sel["status"], sel["status"])
-                    st.markdown(
-                        f"**{DISEASE_EMOJI.get(sel['disease'],'')} {sel['patient_name']}**"
-                        f"　{sel_d}　{sel_s}　{sel['county']}"
+                # 標頭
+                hcols = st.columns([0.35, 1.7, 1.5, 1.3, 1.2, 0.5])
+                for col, lbl in zip(hcols, ["#", "姓名", "疾病", "縣市", "狀態", ""]):
+                    col.markdown(
+                        f"<span style='font-size:0.82rem;font-weight:600;color:#555'>{lbl}</span>",
+                        unsafe_allow_html=True,
                     )
+                st.markdown("<hr style='margin:3px 0 1px;border-color:#ccc'>",
+                            unsafe_allow_html=True)
 
-                eicr = parse_eicr(ss["eicr_case"].get("eicr_path", ""))
-                if eicr is None:
-                    st.error("⚠️ 找不到對應的 eICR 檔案。")
+                view_df = df.head(50).reset_index(drop=True)
+                sel_idx = ss.get("eicr_index", -1)
+
+                for i, row in view_df.iterrows():
+                    is_selected = (i == sel_idx)
+                    bg = "background:#EDF4FF;" if is_selected else ""
+                    rcols = st.columns([0.35, 1.7, 1.5, 1.3, 1.2, 0.5])
+                    d_zh  = f"{DISEASE_EMOJI.get(row['disease'],'')} {DISEASE_ZH.get(row['disease'], row['disease'])}"
+                    s_zh  = STATUS_LABEL.get(row["status"], row["status"])
+                    rcols[0].markdown(
+                        f"<span style='color:#bbb;font-size:0.8rem;{bg}'>{i+1}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    rcols[1].markdown(
+                        f"<span style='font-size:0.9rem;{bg}font-weight:{'600' if is_selected else '400'}'>"
+                        f"{row['patient_name']}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    rcols[2].markdown(
+                        f"<span style='font-size:0.87rem'>{d_zh}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    rcols[3].markdown(
+                        f"<span style='font-size:0.87rem'>{row['county']}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    rcols[4].markdown(
+                        f"<span style='font-size:0.87rem'>{s_zh}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    if rcols[5].button(
+                        "📋", key=f"view_{i}", help="查閱 eICR 通報單",
+                        type="primary" if is_selected else "secondary",
+                    ):
+                        ss["eicr_case"]  = df.iloc[i]
+                        ss["eicr_index"] = i
+                        st.rerun()
+
+            # ── 右：eICR 通報單面板 ───────────────────────────────────────────
+            with view_col:
+                if not is_viewing:
+                    st.markdown(
+                        "<div style='height:200px;display:flex;align-items:center;"
+                        "justify-content:center;border:2px dashed #ccc;"
+                        "border-radius:12px;color:#aaa;font-size:1rem'>"
+                        "← 點選左側案例的 📋 圖示查閱 eICR 通報單"
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    render_eicr_panel(eicr, hospital_name=hospital_name)
+                    sel = ss["eicr_case"]
+                    sel_d = DISEASE_ZH.get(sel["disease"], sel["disease"])
+                    sel_s = STATUS_LABEL.get(sel["status"], sel["status"])
+
+                    # 通報單標題列 + 關閉按鈕
+                    title_row, close_btn = st.columns([5, 1])
+                    with title_row:
+                        st.markdown(
+                            f"**{DISEASE_EMOJI.get(sel['disease'],'')} {sel['patient_name']}**"
+                            f"　{sel_d}　{sel_s}　{sel['county']}"
+                        )
+                    with close_btn:
+                        if st.button("✕ 關閉", key="close_eicr"):
+                            del ss["eicr_case"]
+                            ss.pop("eicr_index", None)
+                            st.rerun()
+
+                    eicr = parse_eicr(sel.get("eicr_path", ""))
+                    if eicr is None:
+                        st.error("⚠️ 找不到 eICR 檔案（可能為舊版資料）。")
+                    else:
+                        render_eicr_panel(eicr, hospital_name=hospital_name)
 
     # ── Tab 4：設定 ─────────────────────────────────────────────────────────────
     with tab_settings:
