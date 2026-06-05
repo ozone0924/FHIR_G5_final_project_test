@@ -304,6 +304,26 @@ def init_db(db_path: str = DB_PATH) -> None:
         ]:
             if col_def[0] not in existing:
                 conn.execute(f"ALTER TABLE cases ADD COLUMN {col_def[0]} {col_def[1]}")
+
+        # Phase B：通報送出記錄
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS submissions (
+                id           TEXT PRIMARY KEY,
+                case_id      TEXT NOT NULL,
+                bundle_id    TEXT NOT NULL,
+                task_id      TEXT NOT NULL,
+                task_status  TEXT NOT NULL,
+                doc_ref_id   TEXT,
+                comm_id      TEXT,
+                submitted_at TEXT NOT NULL,
+                ack_at       TEXT,
+                response     TEXT,
+                note         TEXT,
+                created_at   TEXT NOT NULL
+            )
+            """
+        )
         conn.commit()
     log.info("✅ SQLite 資料庫初始化完成：%s", db_path)
 
@@ -352,6 +372,67 @@ def insert_case(case: dict, db_path: str = DB_PATH) -> bool:
     except sqlite3.Error as e:
         log.error("❌ DB 寫入失敗：%s", e)
         return False
+
+
+# ── Phase B：通報送出記錄 ─────────────────────────────────────────────────────
+
+def create_submission(case_id: str, bundle_id: str, submitted_at: str,
+                      db_path: str = DB_PATH) -> dict:
+    """
+    Phase B：模擬 eICR 送出至 NSSP，建立 Task / Communication / DocumentReference 記錄。
+
+    Parameters
+    ----------
+    submitted_at : str  ISO 8601 送出時間（可為過去，適合 seed 歷史資料）
+    """
+    sub_id     = f"sub-{uuid.uuid4().hex[:8]}"
+    task_id    = f"task-{uuid.uuid4().hex[:8]}"
+    doc_ref_id = f"docref-{uuid.uuid4().hex[:8]}"
+    comm_id    = f"comm-{uuid.uuid4().hex[:8]}"
+
+    # 模擬 NSSP 回應時間（送出後 5 分鐘到 2 小時）
+    try:
+        sub_obj = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
+    except Exception:
+        sub_obj = datetime.now(timezone.utc)
+    ack_delay  = timedelta(minutes=random.uniform(5, 120))
+    ack_obj    = min(sub_obj + ack_delay, datetime.now(timezone.utc))
+    ack_at     = ack_obj.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 模擬成功率（90% accepted）
+    success     = random.random() < 0.90
+    response    = "accepted" if success else "error"
+    task_status = "completed" if success else "rejected"
+    note        = ("eICR 已成功送達疾管署通報系統（NSSP），Task 已完成"
+                   if success else "送出失敗：NSSP 暫時無回應，建議重新送出")
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO submissions
+                    (id, case_id, bundle_id, task_id, task_status,
+                     doc_ref_id, comm_id, submitted_at, ack_at,
+                     response, note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sub_id, case_id, bundle_id, task_id, task_status,
+                    doc_ref_id, comm_id, submitted_at, ack_at,
+                    response, note,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        log.error("❌ Submission 寫入失敗：%s", e)
+
+    log.info("📡 [Phase B] 送出 %s → %s (%s)", sub_id[:8], response, task_status)
+    return {
+        "id": sub_id, "task_id": task_id, "task_status": task_status,
+        "doc_ref_id": doc_ref_id, "comm_id": comm_id,
+        "response": response, "submitted_at": submitted_at, "ack_at": ack_at,
+    }
 
 
 # ── 模擬 FHIR Client（本地模式） ───────────────────────────────────────────────
@@ -564,6 +645,13 @@ def process_case(raw: dict, db_path: str = DB_PATH, output_dir: str = OUTPUT_DIR
         log.info("📋 新案例 → %s | %s | %s | %s",
                  patient["name"], condition["disease"],
                  condition["status"], patient["county"])
+        # Phase B：建立通報送出記錄（Task / Communication / DocumentReference）
+        create_submission(
+            case_id=patient["id"],
+            bundle_id=bundle["id"],
+            submitted_at=case_record["report_date"],
+            db_path=db_path,
+        )
     else:
         log.debug("↩️  重複案例，略過：%s", patient["id"])
 

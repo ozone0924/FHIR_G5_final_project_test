@@ -315,12 +315,24 @@ def render_eicr_panel(eicr: dict, hospital_name: str):
 
 # ── 圖表函式 ──────────────────────────────────────────────────────────────────
 
+_TW_BOUNDS = dict(west=117.5, east=124.0, south=20.5, north=26.8)
+_LEGEND_STYLE = dict(
+    font=dict(color="#222222", size=11),
+    bgcolor="rgba(255,255,255,0.92)",
+    bordercolor="rgba(0,0,0,0.08)",
+    borderwidth=1,
+)
+
+
 def _empty_map(height: int = 460) -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
-        mapbox_style="open-street-map",
-        mapbox_center={"lat": 23.8, "lon": 121.0},
-        mapbox_zoom=6,
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lat=23.8, lon=121.0),
+            zoom=6,
+            bounds=_TW_BOUNDS,
+        ),
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
         height=height,
     )
@@ -350,8 +362,12 @@ def make_map_figure(df: pd.DataFrame, disease_filter: str = "全部",
     )
     fig.update_layout(
         margin={"l": 0, "r": 0, "t": 0, "b": 0},
-        legend=dict(title="疾病類型", orientation="h", yanchor="bottom", y=0.01,
-                    xanchor="right", x=0.99, bgcolor="rgba(255,255,255,0.85)"),
+        mapbox=dict(bounds=_TW_BOUNDS),
+        legend=dict(
+            title=dict(text="疾病類型", font=dict(color="#222")),
+            orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
+            **_LEGEND_STYLE,
+        ),
     )
     return fig
 
@@ -387,8 +403,12 @@ def make_hospital_map(df: pd.DataFrame, disease_filter: str = "全部",
     fig.update_layout(
         margin={"l": 0, "r": 0, "t": 30, "b": 0},
         title=dict(text="🏥 通報醫療院所（泡泡大小 = 通報數）", font_size=13, y=0.97),
-        legend=dict(title="疾病類型", orientation="h", yanchor="bottom", y=0.01,
-                    xanchor="right", x=0.99, bgcolor="rgba(255,255,255,0.85)"),
+        mapbox=dict(bounds=_TW_BOUNDS),
+        legend=dict(
+            title=dict(text="疾病類型", font=dict(color="#222")),
+            orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
+            **_LEGEND_STYLE,
+        ),
     )
     return fig
 
@@ -467,15 +487,18 @@ def make_temporal_map(df: pd.DataFrame, disease_filter: str = "全部",
             ))
 
     fig.update_layout(
-        mapbox_style="open-street-map",
-        mapbox_center={"lat": 23.8, "lon": 121.0},
-        mapbox_zoom=6,
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lat=23.8, lon=121.0),
+            zoom=6,
+            bounds=_TW_BOUNDS,
+        ),
         margin={"l": 0, "r": 0, "t": 30, "b": 0},
         height=height,
         title=dict(text="🕐 疾病擴散時間軸（顏色深 = 越近期）", font_size=13, y=0.97),
         legend=dict(
             orientation="h", yanchor="bottom", y=0.01, xanchor="right", x=0.99,
-            bgcolor="rgba(255,255,255,0.85)", font_size=10,
+            **_LEGEND_STYLE,
         ),
     )
     return fig
@@ -593,6 +616,177 @@ def make_symptom_chart(df: pd.DataFrame, top_n: int = 12) -> go.Figure:
         height=300, margin=dict(l=90, r=20, t=50, b=40),
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
+    return fig
+
+
+# ── Phase B：通報記錄載入 ─────────────────────────────────────────────────────
+
+@st.cache_data(ttl=14)
+def load_submissions(db_path: str) -> pd.DataFrame:
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            if "submissions" not in tables:
+                return pd.DataFrame()
+            df = pd.read_sql_query(
+                """
+                SELECT s.id, s.case_id, s.bundle_id, s.task_id, s.task_status,
+                       s.doc_ref_id, s.comm_id, s.submitted_at, s.ack_at,
+                       s.response, s.note,
+                       c.patient_name, c.disease, c.county, c.status AS case_status
+                FROM submissions s
+                LEFT JOIN cases c ON s.case_id = c.id
+                ORDER BY s.submitted_at DESC
+                """,
+                conn,
+            )
+        if df.empty:
+            return df
+        df["submitted_at"] = pd.to_datetime(df["submitted_at"], utc=True, errors="coerce")
+        df["ack_at"]       = pd.to_datetime(df["ack_at"],       utc=True, errors="coerce")
+        df["sub_date"]     = df["submitted_at"].dt.tz_convert("Asia/Taipei").dt.date
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+# ── MedMorph 工作流程圖 ────────────────────────────────────────────────────────
+
+def make_pipeline_figure() -> go.Figure:
+    """G1→G5 整體 Pipeline 流程概覽"""
+    groups = [
+        ("G1", "病患\n對話",       "#5C6BC0"),
+        ("G2", "FHIR\n資料庫",    "#1565C0"),
+        ("G3", "CQL\n決策引擎",   "#0277BD"),
+        ("G4", "群聚\n分析",       "#00838F"),
+        ("G5 ★", "自動通報\n公衛儀表板", "#C62828"),
+    ]
+    subtitles = ["第一組", "第二組", "第三組", "第四組", "第五組（本組）"]
+    n  = len(groups)
+    xs = [(i + 0.5) / n for i in range(n)]
+    fig = go.Figure()
+
+    for i, ((tag, label, color), x) in enumerate(zip(groups, xs)):
+        is_cur = (i == n - 1)
+        fig.add_shape(type="rect",
+            x0=x - 0.08, y0=0.20, x1=x + 0.08, y1=0.82,
+            fillcolor=color,
+            line=dict(color="#FFD700" if is_cur else "rgba(255,255,255,0.4)",
+                      width=3 if is_cur else 1))
+        fig.add_annotation(x=x, y=0.72, text=f"<b>{tag}</b>",
+            font=dict(color="white", size=12), showarrow=False)
+        fig.add_annotation(x=x, y=0.47, text=label,
+            font=dict(color="rgba(255,255,255,0.88)", size=9.5), showarrow=False)
+        fig.add_annotation(x=x, y=0.08, text=subtitles[i],
+            font=dict(color="#777", size=8), showarrow=False)
+        if i < n - 1:
+            nx = xs[i + 1]
+            fig.add_annotation(
+                x=nx - 0.085, y=0.51, ax=x + 0.085, ay=0.51,
+                xref="paper", yref="paper", axref="paper", ayref="paper",
+                arrowhead=2, arrowcolor="#aaa", arrowwidth=2,
+                showarrow=True, text="",
+            )
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(visible=False, range=[0, 1]),
+        yaxis=dict(visible=False, range=[0, 1]),
+        height=135, margin=dict(l=5, r=5, t=5, b=5),
+    )
+    return fig
+
+
+def make_sequence_figure() -> go.Figure:
+    """MedMorph 自動通報序列圖（含 Phase A/B 標注）"""
+    entities = [
+        ("FHIR/CQL\n(G2-G3)",  "#1565C0"),
+        ("MedMorph\n引擎",      "#C62828"),
+        ("eICR\n產生器",        "#2E7D32"),
+        ("SQLite/\n儀表板",     "#E65100"),
+        ("NSSP\n公衛端點",      "#6A1B9A"),
+    ]
+    n  = len(entities)
+    xs = [(i + 0.5) / n for i in range(n)]
+
+    fig = go.Figure()
+    fig.add_shape(type="rect", x0=0, y0=0, x1=1, y1=1,
+                  fillcolor="rgba(248,250,255,0.6)", line_width=0)
+
+    # Phase 背景色帶
+    for y0, y1, label, bg in [
+        (0.72, 0.96, "Phase A  觸發與產生", "rgba(227,242,253,0.55)"),
+        (0.30, 0.72, "Phase B  送出與追蹤", "rgba(232,245,233,0.55)"),
+        (0.00, 0.30, "Phase C  狀態更新",   "rgba(255,248,225,0.55)"),
+    ]:
+        fig.add_shape(type="rect", x0=0.035, y0=y0, x1=1, y1=y1,
+                      fillcolor=bg, line_width=0)
+        fig.add_annotation(
+            x=0.008, y=(y0 + y1) / 2, text=label,
+            font=dict(size=8, color="#555"), showarrow=False,
+            xanchor="left", textangle=-90,
+        )
+
+    # 實體框 + 生命線
+    for (name, color), x in zip(entities, xs):
+        fig.add_shape(type="rect",
+            x0=x - 0.07, y0=0.92, x1=x + 0.07, y1=0.995,
+            fillcolor=color, line_width=0)
+        fig.add_annotation(x=x, y=0.957, text=f"<b>{name}</b>",
+            font=dict(color="white", size=7.5), showarrow=False)
+        fig.add_shape(type="line",
+            x0=x, y0=0, x1=x, y1=0.92,
+            line=dict(color=color, width=1, dash="dot"))
+
+    # 訊息序列
+    # (from_idx, to_idx, y, label)
+    msgs = [
+        (0, 1, 0.86, "① Condition (suspected) 偵測，觸發 PlanDefinition"),
+        (1, 2, 0.78, "② 啟動 eICR 建立流程"),
+        (2, 1, 0.70, "③ FHIR R4 Bundle 回傳"),
+        (1, 3, 0.62, "④ 案例寫入 SQLite DB"),
+        (1, 1, 0.55, "⑤ Task (requested) 建立"),
+        (1, 4, 0.47, "⑥ POST eICR → NSSP（Task: in-progress）"),
+        (4, 1, 0.38, "⑦ Acknowledgement 回傳"),
+        (1, 1, 0.31, "⑧ Task (completed) + Communication 建立"),
+        (1, 3, 0.22, "⑨ DocumentReference 版本歷史記錄"),
+        (3, 3, 0.12, "⑩ 儀表板自動刷新（每 15 秒）"),
+    ]
+    entity_colors = [e[1] for e in entities]
+
+    for from_i, to_i, y, label in msgs:
+        fx = xs[from_i]; tx = xs[to_i]
+        color = entity_colors[from_i]
+        if from_i == to_i:
+            # 自訊息：小矩形
+            fig.add_shape(type="rect",
+                x0=fx, y0=y - 0.022, x1=fx + 0.055, y1=y + 0.022,
+                fillcolor="rgba(255,255,255,0.88)",
+                line=dict(color=color, width=1))
+            fig.add_annotation(x=fx + 0.028, y=y, text=label,
+                font=dict(size=7.5, color=color), showarrow=False)
+        else:
+            fig.add_annotation(
+                x=tx, y=y, ax=fx, ay=y,
+                xref="paper", yref="paper", axref="paper", ayref="paper",
+                arrowhead=2, arrowcolor=color, arrowwidth=1.5,
+                showarrow=True, text="",
+            )
+            fig.add_annotation(
+                x=(fx + tx) / 2, y=y + 0.028, text=label,
+                font=dict(size=8, color=color), showarrow=False,
+                bgcolor="rgba(255,255,255,0.78)", borderpad=2,
+            )
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(visible=False, range=[0, 1]),
+        yaxis=dict(visible=False, range=[0, 1]),
+        height=490, margin=dict(l=40, r=5, t=5, b=5),
+    )
     return fig
 
 
@@ -745,9 +939,9 @@ def main():
     TAB_H  = 560
     LIST_H = TAB_H - 2
 
-    tab_map, tab_trend, tab_cases, tab_demo, tab_settings = st.tabs([
+    tab_map, tab_trend, tab_cases, tab_demo, tab_track, tab_settings = st.tabs([
         "🗺️ 地理分布", "📈 趨勢分析", "📋 案例明細 & 通報單",
-        "📊 人口統計", "⚙️ 設定",
+        "📊 人口統計", "📡 通報追蹤", "⚙️ 設定",
     ])
 
     # ── Tab 1：地理分布 ─────────────────────────────────────────────────────────
@@ -971,7 +1165,135 @@ def main():
                     })[["疾病", "疑似", "確診", "確診率"]]
                     st.dataframe(stat_tbl, use_container_width=True, hide_index=True)
 
-    # ── Tab 5：設定 ─────────────────────────────────────────────────────────────
+    # ── Tab 5：通報追蹤 ─────────────────────────────────────────────────────────
+    with tab_track:
+        with st.container(height=TAB_H, border=False):
+            # ── MedMorph 流程圖 ────────────────────────────────────────────────
+            st.markdown("#### 🔄 MedMorph 自動通報架構")
+            st.plotly_chart(make_pipeline_figure(), use_container_width=True,
+                            config={"displayModeBar": False})
+
+            with st.expander("🔍 展開：MedMorph 完整通報序列圖", expanded=True):
+                seq_col, info_col = st.columns([3, 1])
+                with seq_col:
+                    st.plotly_chart(make_sequence_figure(), use_container_width=True,
+                                    config={"displayModeBar": False})
+                with info_col:
+                    st.markdown("""
+**Phase A — 觸發與產生**
+- FHIR Condition 疑似病例觸發
+- 自動查詢病患完整資料
+- 產生 HL7 eICR Bundle
+
+**Phase B — 送出與追蹤**
+- Task 資源管理送出狀態
+- POST eICR 至 NSSP 公衛端點
+- Communication 記錄通知
+- DocumentReference 版本歷史
+
+**Phase C — 狀態更新**
+- SQLite 持久化儲存
+- Streamlit 儀表板即時顯示
+
+---
+**FHIR 資源清單**
+- `Bundle` (type=document)
+- `Composition`, `Patient`
+- `Condition`, `Observation`
+- `Encounter`, `Organization` ×2
+- `Task`, `Communication`
+- `DocumentReference`
+""")
+
+            # ── Phase B 送出記錄 ───────────────────────────────────────────────
+            st.markdown("#### 📋 Phase B 通報送出記錄")
+            sdf = load_submissions(db_path_val)
+
+            if sdf.empty:
+                st.info("尚無送出記錄。請執行 seed_data.py 或等候 MedMorph 引擎產生新案例。")
+            else:
+                # 統計卡片
+                total_s  = len(sdf)
+                accepted = (sdf["response"] == "accepted").sum()
+                rejected = (sdf["response"] == "error").sum()
+                pending  = total_s - accepted - rejected
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                for col, label, val, color in [
+                    (sc1, "📤 累計送出",   total_s,  "#1565C0"),
+                    (sc2, "✅ Accepted",  accepted, "#2E7D32"),
+                    (sc3, "❌ Error",     rejected, "#C62828"),
+                    (sc4, "⏳ Pending",   pending,  "#E65100"),
+                ]:
+                    col.markdown(
+                        f"<div style='background:{color};color:white;border-radius:8px;"
+                        f"padding:8px 12px;text-align:center'>"
+                        f"<div style='font-size:1.5rem;font-weight:700'>{val}</div>"
+                        f"<div style='font-size:0.8rem;opacity:0.85'>{label}</div></div>",
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("<div style='margin:6px 0'></div>", unsafe_allow_html=True)
+
+                # 格式化表格
+                def status_badge(r):
+                    if r == "accepted":
+                        return "✅ Accepted"
+                    if r == "error":
+                        return "❌ Error"
+                    return "⏳ Pending"
+
+                display = sdf.head(50).copy()
+                display["通報時間 (TPE)"] = display["submitted_at"].apply(
+                    lambda r: r.astimezone(TZ_TPE).strftime("%m/%d %H:%M") if pd.notna(r) else ""
+                )
+                display["回應時間 (TPE)"] = display["ack_at"].apply(
+                    lambda r: r.astimezone(TZ_TPE).strftime("%m/%d %H:%M") if pd.notna(r) else ""
+                )
+                display["狀態"] = display["response"].apply(status_badge)
+                display["Task 狀態"] = display["task_status"].map(
+                    {"completed": "✅ completed", "rejected": "❌ rejected",
+                     "in-progress": "🔄 in-progress", "requested": "⏳ requested"}
+                ).fillna(display["task_status"])
+                display["疾病"] = display["disease"].map(
+                    lambda d: f"{DISEASE_EMOJI.get(d,'')} {DISEASE_ZH.get(d,d)}"
+                )
+
+                st.dataframe(
+                    display[[
+                        "patient_name", "疾病", "county",
+                        "狀態", "Task 狀態",
+                        "通報時間 (TPE)", "回應時間 (TPE)", "note",
+                    ]].rename(columns={
+                        "patient_name": "病患", "county": "縣市", "note": "備註"
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                # 送出成功率趨勢（按日）
+                if "sub_date" in sdf.columns and not sdf.empty:
+                    daily = (sdf.groupby(["sub_date", "response"])
+                               .size().unstack(fill_value=0).reset_index())
+                    if "accepted" in daily.columns or "error" in daily.columns:
+                        fig_s = go.Figure()
+                        if "accepted" in daily.columns:
+                            fig_s.add_trace(go.Bar(
+                                x=daily["sub_date"], y=daily.get("accepted", 0),
+                                name="✅ Accepted", marker_color="#2E7D32"))
+                        if "error" in daily.columns:
+                            fig_s.add_trace(go.Bar(
+                                x=daily["sub_date"], y=daily.get("error", 0),
+                                name="❌ Error", marker_color="#C62828"))
+                        fig_s.update_layout(
+                            barmode="stack",
+                            title=dict(text="每日送出狀態", font_size=13),
+                            height=180, margin=dict(l=40, r=10, t=35, b=30),
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            legend=dict(orientation="h", y=1.15, x=1, xanchor="right"),
+                        )
+                        st.plotly_chart(fig_s, use_container_width=True)
+
+    # ── Tab 6：設定 ─────────────────────────────────────────────────────────────
     with tab_settings:
         with st.container(height=TAB_H, border=False):
             s1, s2 = st.columns(2)

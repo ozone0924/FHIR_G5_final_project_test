@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from eicr_generator import generate_eicr, save_eicr
 from medmorph_engine import (
-    init_db, insert_case, DB_PATH, OUTPUT_DIR,
+    init_db, insert_case, create_submission, DB_PATH, OUTPUT_DIR,
     random_hospital, random_home,
     HOSPITALS, DISTRICTS,
 )
@@ -198,6 +198,13 @@ def seed(count: int = 120, days_back: int = 30,
         ok = insert_case(case_record, db_path=db_path)
         if ok:
             inserted += 1
+            # Phase B：建立歷史通報送出記錄
+            create_submission(
+                case_id=patient["id"],
+                bundle_id=bundle["id"],
+                submitted_at=condition["report_date"],
+                db_path=db_path,
+            )
         else:
             skipped += 1
 
