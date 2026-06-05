@@ -1,0 +1,314 @@
+{
+  "resourceType": "Bundle",
+  "id": "625f0d22-c7c4-421f-a303-72eb20595b39",
+  "meta": {
+    "profile": [
+      "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-document-bundle"
+    ],
+    "lastUpdated": "2026-05-14T16:19:24Z"
+  },
+  "type": "document",
+  "timestamp": "2026-05-14T16:19:24Z",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:a440f10a-203a-4205-b839-5b8b1fd4f5fa",
+      "resource": {
+        "resourceType": "Composition",
+        "id": "a440f10a-203a-4205-b839-5b8b1fd4f5fa",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-composition"
+          ]
+        },
+        "status": "preliminary",
+        "type": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "55751-2",
+              "display": "Public health case report - PHRI"
+            }
+          ]
+        },
+        "subject": {
+          "reference": "Patient/patient-0efd437997"
+        },
+        "encounter": {
+          "reference": "Encounter/454b860a-1005-4fbd-a48b-3c723330c7aa"
+        },
+        "date": "2026-05-14T16:19:24Z",
+        "author": [
+          {
+            "reference": "Organization/org-hosp-a1dff4"
+          }
+        ],
+        "custodian": {
+          "reference": "Organization/org-tw-cdc"
+        },
+        "title": "eICR - Dengue 疑似病例通報",
+        "section": [
+          {
+            "title": "Chief Complaint",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "10154-3",
+                  "display": "Chief complaint Narrative"
+                }
+              ]
+            },
+            "text": {
+              "status": "generated",
+              "div": "<div xmlns='http://www.w3.org/1999/xhtml'>主訴：高燒、出血傾向、疲倦</div>"
+            }
+          },
+          {
+            "title": "Reportable Conditions",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "55752-0",
+                  "display": "Reportable condition"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Condition/4a3d6e87-83fc-4c6d-95e4-f90971cec576"
+              }
+            ]
+          },
+          {
+            "title": "Results",
+            "code": {
+              "coding": [
+                {
+                  "system": "http://loinc.org",
+                  "code": "30954-2",
+                  "display": "Relevant diagnostic tests/laboratory data Narrative"
+                }
+              ]
+            },
+            "entry": [
+              {
+                "reference": "Observation/be691ccb-0b46-4996-81cf-743be59d9c1d"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Patient/patient-0efd437997",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-0efd437997",
+        "name": [
+          {
+            "use": "official",
+            "text": "邱郁君"
+          }
+        ],
+        "birthDate": "1965-03-02",
+        "gender": "female",
+        "telecom": [],
+        "address": [
+          {
+            "use": "home",
+            "line": [
+              "台南市新化區民權路435號"
+            ],
+            "district": "新化區",
+            "city": "台南市",
+            "country": "TW"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Condition/4a3d6e87-83fc-4c6d-95e4-f90971cec576",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "4a3d6e87-83fc-4c6d-95e4-f90971cec576",
+        "meta": {
+          "profile": [
+            "http://hl7.org/fhir/us/ecr/StructureDefinition/eicr-condition"
+          ]
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "suspected",
+              "display": "Suspected"
+            }
+          ]
+        },
+        "verificationStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+              "code": "provisional"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                "code": "encounter-diagnosis",
+                "display": "Encounter Diagnosis"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "38362002",
+              "display": "Dengue fever (disorder)"
+            }
+          ],
+          "text": "Dengue"
+        },
+        "subject": {
+          "reference": "Patient/patient-0efd437997"
+        },
+        "onsetDateTime": "2026-05-14T12:23:56Z",
+        "recordedDate": "2026-05-14T16:19:24Z"
+      }
+    },
+    {
+      "fullUrl": "Observation/be691ccb-0b46-4996-81cf-743be59d9c1d",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "be691ccb-0b46-4996-81cf-743be59d9c1d",
+        "status": "preliminary",
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "laboratory",
+                "display": "Laboratory"
+              }
+            ]
+          }
+        ],
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "86615-1",
+              "display": "Dengue virus IgM Ab panel"
+            }
+          ],
+          "text": "Dengue 檢驗"
+        },
+        "subject": {
+          "reference": "Patient/patient-0efd437997"
+        },
+        "effectiveDateTime": "2026-05-14T12:23:56Z",
+        "valueCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "52101004",
+              "display": "Present"
+            }
+          ],
+          "text": "高燒、出血傾向、疲倦"
+        }
+      }
+    },
+    {
+      "fullUrl": "Encounter/454b860a-1005-4fbd-a48b-3c723330c7aa",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "454b860a-1005-4fbd-a48b-3c723330c7aa",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "11429006",
+                "display": "Consultation"
+              }
+            ]
+          }
+        ],
+        "subject": {
+          "reference": "Patient/patient-0efd437997"
+        },
+        "serviceProvider": {
+          "reference": "Organization/org-hosp-a1dff4"
+        },
+        "period": {
+          "start": "2026-05-14T12:23:56Z",
+          "end": "2026-05-14T12:23:56Z"
+        }
+      }
+    },
+    {
+      "fullUrl": "Organization/org-hosp-a1dff4",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-hosp-a1dff4",
+        "type": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/organization-type",
+                "code": "prov",
+                "display": "Healthcare Provider"
+              }
+            ]
+          }
+        ],
+        "name": "台南市立醫院",
+        "address": [
+          {
+            "text": "台南市東區崇德路670號",
+            "country": "TW"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "Organization/org-tw-cdc",
+      "resource": {
+        "resourceType": "Organization",
+        "id": "org-tw-cdc",
+        "name": "衛生福利部疾病管制署",
+        "alias": [
+          "Taiwan CDC"
+        ],
+        "telecom": [
+          {
+            "system": "url",
+            "value": "https://www.cdc.gov.tw"
+          }
+        ],
+        "address": [
+          {
+            "line": [
+              "林森北路161號"
+            ],
+            "city": "台北市",
+            "country": "TW"
+          }
+        ]
+      }
+    }
+  ]
+}
